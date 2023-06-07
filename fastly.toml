@@ -1,0 +1,12 @@
+# This file describes a Fastly Compute@Edge package. To learn more visit:
+# https://developer.fastly.com/reference/fastly-toml/
+
+authors = ["laylward@gmail.com"]
+description = "Imgur API"
+language = "javascript"
+manifest_version = 3
+name = "imgur-at-edge"
+service_id = "9j3gE87WAg0nVzuzL9ydc5"
+
+[scripts]
+  build = "npm run build"
