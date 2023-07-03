@@ -13,7 +13,7 @@ const types = {
 const mimes = {
   "jpg": "image/jpeg",
   "gif": "image/gif",
-  "png": "image/x-png"
+  "png": "image/png"
 }
 
 router.use((req, res) => {
