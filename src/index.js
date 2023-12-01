@@ -20,6 +20,32 @@ const mimes = {
   "mp4": "video/mp4"
 }
 
+const magic = {
+    "png": [
+        [0x89,0x50,0x4E,0x47]
+    ],
+    "gif": [
+        [0x47,0x49,0x46,0x38,0x37,0x61],
+        [0x47,0x49,0x46,0x38,0x39,0x61]
+    ],
+    "jpg": [
+        [0xFF,0xD8,0xFF,0xDB],
+        [0xFF,0xD8,0xFF,0xE0],
+        [0xFF,0xD8,0xFF,0xEE],
+        [0xFF,0xD8,0xFF,0xE1]
+    ],
+    "jpeg": [
+        [0xFF,0xD8,0xFF,0xDB],
+        [0xFF,0xD8,0xFF,0xE0],
+        [0xFF,0xD8,0xFF,0xEE],
+        [0xFF,0xD8,0xFF,0xE1]
+    ],
+    "mp4": [
+        [0x66,0x74,0x79,0x70,0x69,0x73,0x6F,0x6D],
+        [0x66,0x74,0x79,0x70,0x4D,0x53,0x4E,0x56]
+    ]
+}
+
 router.use((req, res) => {
   res.headers.set("service-version", env("FASTLY_SERVICE_VERSION"));
 });
@@ -65,9 +91,29 @@ router.put("/", async (req, res) => {
     return;
   }
 
+  let img = await req.arrayBuffer();
+
+  if (magic[extension]) {
+    let start = new Uint8Array(img.slice(0, 32));
+    let ok = magic[extension].some((m) => {
+      for (var i=0; i < m.length; i++) {
+        if (m[i] != start[i]) {
+          return false
+        }
+      }
+      return true
+    });
+
+    if (!ok) {
+      res.withStatus(400).json({
+        error: "invalid " + extension
+      });
+      return;
+    }
+  }
+
   let id = uuidv4().replaceAll("-", "");
   let kv = new KVStore("images");
-  let img = await req.arrayBuffer();
   await kv.put(id, img)
 
   if (req.headers.has('origin')) {
