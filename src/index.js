@@ -8,19 +8,23 @@ const types = {
   "image/jpeg":  "jpg",
   "image/gif":   "gif",
   "image/x-png": "png",
-  "image/png": "png"
+  "image/png": "png",
+  "video/quicktime": "mov",
+  "video/mp4": "mp4"
 };
 const mimes = {
   "jpg": "image/jpeg",
   "gif": "image/gif",
-  "png": "image/png"
+  "png": "image/png",
+  "mov": "video/quicktime",
+  "mp4": "video/mp4"
 }
 
 router.use((req, res) => {
   res.headers.set("service-version", env("FASTLY_SERVICE_VERSION"));
 });
 
-router.get(/([a-zA-Z0-9]+).(jpg|png|gif)/, async (req, res) => {
+router.get(/([a-zA-Z0-9]+).(jpe?g|png|gif|mp4|mov)/, async (req, res) => {
   let id = req.path.substring(1, req.path.length - 4);
   let ext = req.path.substring(req.path.length - 3);
   let mime = mimes[ext];
