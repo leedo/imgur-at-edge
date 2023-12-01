@@ -13,8 +13,8 @@
   },
   "homepage": "https://developer.fastly.com/solutions/starters/compute-starter-kit-javascript-empty",
   "dependencies": {
-    "@fastly/expressly": "^1.4.0",
-    "@fastly/js-compute": "^2.0.0",
+    "@fastly/expressly": "^2.2.1",
+    "@fastly/js-compute": "^3.7.3",
     "uuid": "^9.0.0"
   },
   "scripts": {
