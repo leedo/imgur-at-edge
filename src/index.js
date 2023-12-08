@@ -3,6 +3,7 @@ import { Router } from "@fastly/expressly";
 import { v4 as uuidv4 } from 'uuid';
 import { env } from "fastly:env";
 
+const MAX_LENGTH = 1024 * 1024 * 10;
 const router = new Router();
 const types = {
   "image/jpeg":  "jpg",
@@ -35,12 +36,6 @@ const magic = {
     [0,[0xFF,0xD8,0xFF,0xEE]],
     [0,[0xFF,0xD8,0xFF,0xE1]]
   ],
-  "jpeg": [
-    [0,[0xFF,0xD8,0xFF,0xDB]],
-    [0,[0xFF,0xD8,0xFF,0xE0]],
-    [0,[0xFF,0xD8,0xFF,0xEE]],
-    [0,[0xFF,0xD8,0xFF,0xE1]]
-  ],
   "mp4": [
     [0,[0x66,0x74,0x79,0x70,0x69,0x73,0x6F,0x6D]],
     [0,[0x66,0x74,0x79,0x70,0x4D,0x53,0x4E,0x56]]
@@ -54,7 +49,7 @@ router.use((req, res) => {
   res.headers.set("service-version", env("FASTLY_SERVICE_VERSION"));
 });
 
-router.get(/([a-zA-Z0-9]+).(jpe?g|png|gif|mp4|mov)/, async (req, res) => {
+router.get(/([a-zA-Z0-9]+).(jpg|png|gif|mp4|mov)/, async (req, res) => {
   let id = req.path.substring(1, req.path.length - 4);
   let ext = req.path.substring(req.path.length - 3);
   let mime = mimes[ext];
@@ -86,8 +81,21 @@ router.options("(.*)", async (req, res) => {
 
 router.put("/", async (req, res) => {
   let type = req.headers.get("content-type");
+  let len  = req.headers.get("content-length");
   let extension = types[type];
 
+  if (!len) {
+    res.withStatus(400).json({
+      error: "missing content-length"
+    });
+    return;
+  }
+  if (len > MAX_LENGTH) {
+    res.withStatus(400).json({
+      error: "content-length too large"
+    });
+    return;
+  }
   if (!extension) {
     res.withStatus(400).json({
       error: "unknown content-type"
