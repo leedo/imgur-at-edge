@@ -1,0 +1,17 @@
+# This file describes a Fastly Compute package. To learn more visit:
+# https://www.fastly.com/documentation/reference/compute/fastly-toml
+
+authors = ["laylward@gmail.com"]
+cloned_from = "https://github.com/fastly/compute-starter-kit-go-default"
+description = "imgur-at-edge in go"
+language = "go"
+manifest_version = 3
+name = "imgur-at-edge-go"
+service_id = "locG5VoijqCGhZcpRNmZUC"
+
+[local_server]
+
+[scripts]
+  build = "go build -o bin/main.wasm ."
+  env_vars = ["GOARCH=wasm", "GOOS=wasip1"]
+  post_init = "go get github.com/fastly/compute-sdk-go@latest"
