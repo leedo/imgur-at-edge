@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha1"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,14 +13,12 @@ import (
 	"os"
 	"regexp"
 	"strconv"
-	"strings"
 
 	"github.com/fastly/compute-sdk-go/fsthttp"
 	"github.com/fastly/compute-sdk-go/kvstore"
-	"github.com/google/uuid"
 )
 
-const minValidationLen = 32
+const minValidationLen = 1024
 const maxLength = 1024 * 1024 * 25
 
 var types = map[string]string{
@@ -72,57 +72,78 @@ func (v validator) validate(b []byte) bool {
 	return bytes.Equal(b[v.offset:int(v.offset)+len(v.bytes)], v.bytes)
 }
 
+type ValidatorError struct {
+	kind string
+}
+
+func (e ValidatorError) Error() string {
+	return "invalid " + e.kind
+}
+
 type ValidMediaReader struct {
 	reader     io.ReadCloser
 	validators []validator
-	tmp        []byte
 	buf        []byte
-	size       int
 	validated  bool
 	kind       string
+	name       string
+	eof        bool
+	hash       string
 }
 
+var ErrMustValidate = errors.New("must call Validate before Read")
+
 func (v *ValidMediaReader) Read(p []byte) (int, error) {
-	if v.validated {
-		return v.reader.Read(p)
+	if !v.validated {
+		return 0, ErrMustValidate
 	}
 
-	n, err := v.reader.Read(v.tmp)
-	if err != nil {
-		return 0, err
-	}
-
-	if v.size == 0 && n >= minValidationLen {
-		if err := v.validate(v.tmp); err != nil {
-			return 0, err
-		}
-		v.validated = true
-		copy(p, v.tmp)
+	if len(v.buf) > 0 {
+		copy(p, v.buf)
+		n := len(v.buf)
+		v.buf = nil
 		return n, nil
 	}
 
-	v.buf = append(v.buf, v.tmp...)
-	v.size += n
-
-	if v.size >= minValidationLen {
-		if err := v.validate(v.tmp); err != nil {
-			return 0, err
-		}
-		v.validated = true
-		copy(p, v.buf)
-		return v.size, nil
+	if v.eof {
+		return 0, io.EOF
 	}
 
-	return 0, nil
+	return v.reader.Read(p)
 }
 
-func (v *ValidMediaReader) validate(b []byte) error {
+func (v *ValidMediaReader) Validate() error {
+	sha := sha1.New()
+	r := io.TeeReader(v.reader, sha)
+
+	b := make([]byte, minValidationLen)
+	var n int
+	var err error
+
+	for n < minValidationLen && err == nil {
+		var nn int
+		nn, err = r.Read(b[n:])
+		n += nn
+	}
+	if err != nil {
+		if n > 0 && err == io.EOF {
+			// swallow eof error for returning from Read call
+			v.eof = true
+		} else {
+			return err
+		}
+	}
+
+	v.hash = hex.EncodeToString(sha.Sum(nil))
+	v.validated = true
+
 	for _, validator := range v.validators {
 		if ok := validator.validate(b); ok {
+			v.buf = b
 			return nil
 		}
 	}
-	return errors.New("invalid " + v.kind)
+	return ValidatorError{v.kind}
 }
 
 func (v *ValidMediaReader) Close() error {
@@ -133,8 +154,6 @@ func NewValidMediaReader(r io.ReadCloser, validators []validator, kind string) *
 	return &ValidMediaReader{
 		reader:     r,
 		validators: validators,
-		tmp:        make([]byte, minValidationLen),
-		buf:        make([]byte, 0),
 		kind:       kind,
 	}
 }
@@ -196,13 +215,24 @@ func main() {
 				v := NewValidMediaReader(r.Body, validators, ext)
 				defer v.Close()
 
+				if err := v.Validate(); err != nil {
+					var validatorErr ValidatorError
+					if errors.As(err, &validatorErr) {
+						badRequest(w, validatorErr.Error())
+						return
+					}
+					internalError(w, "error validating: "+err.Error())
+					return
+				}
+
 				s, err := kvstore.Open("images")
 				if err != nil {
 					internalError(w, "error opening: "+err.Error())
 					return
 				}
 
-				id := strings.ReplaceAll(uuid.New().String(), "-", "")
+				//id := strings.ReplaceAll(uuid.New().String(), "-", "")
+				id := v.hash
 				if err := s.Insert(id, v); err != nil {
 					internalError(w, "error inserting: "+err.Error())
 					return
