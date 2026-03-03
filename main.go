@@ -165,6 +165,19 @@ func NewValidMediaReader(r io.ReadCloser, validators []validator, kind string) *
 var getPath = regexp.MustCompile(`^/[a-zA-Z0-9]+\.(?:jpg|png|gif|mp4|mov)$`)
 
 func badRequest(w fsthttp.ResponseWriter, msg string) {
+	jsonError(w, fsthttp.StatusBadRequest, msg)
+}
+
+func internalError(w fsthttp.ResponseWriter, msg string) {
+	log.Println(msg)
+	jsonError(w, fsthttp.StatusInternalServerError, "internal error")
+}
+
+func notFoundError(w fsthttp.ResponseWriter) {
+	jsonError(w, fsthttp.StatusNotFound, "not found")
+}
+
+func jsonError(w fsthttp.ResponseWriter, status int, msg string) {
 	type jsError struct {
 		Err string `json:"error"`
 	}
@@ -173,19 +186,6 @@ func badRequest(w fsthttp.ResponseWriter, msg string) {
 	if err := json.NewEncoder(w).Encode(jsError{msg}); err != nil {
 		log.Printf("error writing error: %s", err)
 	}
-}
-
-func internalError(w fsthttp.ResponseWriter, msg string) {
-	log.Println(msg)
-	w.Header().Add("Content-Type", "application/json")
-	w.WriteHeader(fsthttp.StatusInternalServerError)
-	fmt.Fprintf(w, `{"error":"internal error"}`)
-}
-
-func notFoundError(w fsthttp.ResponseWriter) {
-	w.Header().Add("Content-Type", "application/json")
-	w.WriteHeader(fsthttp.StatusNotFound)
-	fmt.Fprint(w, `{"error":"not found"}`)
 }
 
 func main() {
@@ -204,7 +204,7 @@ func main() {
 
 				validators, ok := magic[ext]
 				if !ok {
-					badRequest(w, "no validators for "+ext)
+					internalError(w, "no validators for "+ext)
 					return
 				}
 
@@ -243,9 +243,7 @@ func main() {
 					return
 				}
 
-				//id := strings.ReplaceAll(uuid.New().String(), "-", "")
-				id := v.hash
-				if err := s.Insert(id, v); err != nil {
+				if err := s.Insert(v.hash, v); err != nil {
 					internalError(w, "error inserting: "+err.Error())
 					return
 				}
@@ -258,7 +256,7 @@ func main() {
 
 				w.WriteHeader(fsthttp.StatusOK)
 				const js = `{"status": "ok", "data": {"id": "%s", "link": "https://%s/%s.%s"}}`
-				fmt.Fprintf(w, js, id, r.URL.Host, id, ext)
+				fmt.Fprintf(w, js, v.hash, r.URL.Host, v.hash, ext)
 				return
 			}
 		} else if r.Method == "GET" {
