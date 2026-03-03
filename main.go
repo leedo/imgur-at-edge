@@ -103,6 +103,7 @@ func (v *ValidMediaReader) Read(p []byte) (int, error) {
 	}
 
 	if len(v.buf) > 0 {
+		// todo check p capacity
 		n := copy(p, v.buf)
 		v.buf = nil
 		return n, nil
