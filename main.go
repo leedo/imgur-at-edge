@@ -18,8 +18,10 @@ import (
 	"github.com/fastly/compute-sdk-go/kvstore"
 )
 
-const minValidationLen = 1024
-const maxLength = 1024 * 1024 * 25
+const (
+	minValidationLen = 1024
+	maxLength        = 1024 * 1024 * 25
+)
 
 var types = map[string]string{
 	"image/jpeg":      "jpg",
@@ -293,7 +295,8 @@ func main() {
 			return
 		}
 
+		w.Header().Add("Content-Type", "application/json")
 		w.WriteHeader(fsthttp.StatusNotFound)
-		fmt.Fprint(w, "not found")
+		fmt.Fprint(w, `{"error":"not found"}`)
 	})
 }
