@@ -99,8 +99,7 @@ func (v *ValidMediaReader) Read(p []byte) (int, error) {
 	}
 
 	if len(v.buf) > 0 {
-		copy(p, v.buf)
-		n := len(v.buf)
+		n := copy(p, v.buf)
 		v.buf = nil
 		return n, nil
 	}
