@@ -13,7 +13,9 @@ import (
 	"os"
 	"regexp"
 	"strconv"
+	"time"
 
+	"github.com/fastly/compute-sdk-go/cache/simple"
 	"github.com/fastly/compute-sdk-go/fsthttp"
 	"github.com/fastly/compute-sdk-go/kvstore"
 )
@@ -165,6 +167,7 @@ func badRequest(w fsthttp.ResponseWriter, msg string) {
 	type jsError struct {
 		Err string `json:"error"`
 	}
+	w.Header().Add("Content-Type", "application/json")
 	w.WriteHeader(fsthttp.StatusBadRequest)
 	if err := json.NewEncoder(w).Encode(jsError{msg}); err != nil {
 		log.Printf("error writing error: %s", err)
@@ -173,6 +176,7 @@ func badRequest(w fsthttp.ResponseWriter, msg string) {
 
 func internalError(w fsthttp.ResponseWriter, msg string) {
 	log.Println(msg)
+	w.Header().Add("Content-Type", "application/json")
 	w.WriteHeader(fsthttp.StatusInternalServerError)
 	fmt.Fprintf(w, `{"error":"internal error"}`)
 }
@@ -252,24 +256,38 @@ func main() {
 			}
 		} else if r.Method == "GET" {
 			if getPath.MatchString(r.URL.Path) {
-				s, err := kvstore.Open("images")
-				if err != nil {
-					internalError(w, "error opening "+err.Error())
-					return
-				}
-
 				file := r.URL.Path[1:]
-				id := string(file[:len(file)-4])
-				ext := string(file[len(file)-3:])
+				id := file[:len(file)-4]
+				ext := file[len(file)-3:]
 				mime, ok := mimes[ext]
 				if !ok {
 					badRequest(w, "unknown extension "+ext)
 					return
 				}
 
-				res, err := s.Lookup(id)
+				w.Header().Set("X-Cache", "HIT")
+
+				res, err := simple.GetOrSet([]byte(id), func() (simple.CacheEntry, error) {
+					s, err := kvstore.Open("images")
+					if err != nil {
+						return simple.CacheEntry{}, err
+					}
+
+					res, err := s.Lookup(string(id))
+					if err != nil {
+						return simple.CacheEntry{}, err
+					}
+
+					w.Header().Set("X-Cache", "MISS")
+
+					return simple.CacheEntry{
+						Body: res,
+						TTL:  24 * time.Hour,
+					}, nil
+				})
+
 				if err != nil {
-					internalError(w, fmt.Sprintf("error doing lookup: %s %s\n", id, err))
+					internalError(w, err.Error())
 					return
 				}
 
