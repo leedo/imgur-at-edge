@@ -162,7 +162,7 @@ func NewValidMediaReader(r io.ReadCloser, validators []validator, kind string) *
 	}
 }
 
-var getPath = regexp.MustCompile(`^/([a-zA-Z0-9]+)\.(jpg|png|gif|mp4|mov)$`)
+var getPath = regexp.MustCompile(`^/[a-zA-Z0-9]+\.(?:jpg|png|gif|mp4|mov)$`)
 
 func badRequest(w fsthttp.ResponseWriter, msg string) {
 	type jsError struct {
@@ -180,6 +180,12 @@ func internalError(w fsthttp.ResponseWriter, msg string) {
 	w.Header().Add("Content-Type", "application/json")
 	w.WriteHeader(fsthttp.StatusInternalServerError)
 	fmt.Fprintf(w, `{"error":"internal error"}`)
+}
+
+func notFoundError(w fsthttp.ResponseWriter) {
+	w.Header().Add("Content-Type", "application/json")
+	w.WriteHeader(fsthttp.StatusNotFound)
+	fmt.Fprint(w, `{"error":"not found"}`)
 }
 
 func main() {
@@ -288,6 +294,10 @@ func main() {
 				})
 
 				if err != nil {
+					if err == kvstore.ErrKeyNotFound {
+						notFoundError(w)
+						return
+					}
 					internalError(w, err.Error())
 					return
 				}
@@ -314,8 +324,6 @@ func main() {
 			return
 		}
 
-		w.Header().Add("Content-Type", "application/json")
-		w.WriteHeader(fsthttp.StatusNotFound)
-		fmt.Fprint(w, `{"error":"not found"}`)
+		notFoundError(w)
 	})
 }
