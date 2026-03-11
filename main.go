@@ -32,17 +32,18 @@ func main() {
 	fmt.Println("FASTLY_SERVICE_VERSION:", os.Getenv("FASTLY_SERVICE_VERSION"))
 
 	fsthttp.ServeFunc(func(ctx context.Context, w fsthttp.ResponseWriter, r *fsthttp.Request) {
-		if r.Method == "PUT" {
+		switch r.Method {
+		case "PUT":
 			if r.URL.Path == "/" {
 				handlePut(w, r)
 				return
 			}
-		} else if r.Method == "GET" {
+		case "GET":
 			if getPath.MatchString(r.URL.Path) {
 				handleGet(w, r)
 				return
 			}
-		} else if r.Method == "OPTIONS" {
+		case "OPTIONS":
 			handleOptions(w, r)
 			return
 		}
