@@ -33,17 +33,17 @@ func main() {
 
 	fsthttp.ServeFunc(func(ctx context.Context, w fsthttp.ResponseWriter, r *fsthttp.Request) {
 		switch r.Method {
-		case "PUT":
+		case fsthttp.MethodPut:
 			if r.URL.Path == "/" {
 				handlePut(w, r)
 				return
 			}
-		case "GET":
+		case fsthttp.MethodGet:
 			if getPath.MatchString(r.URL.Path) {
 				handleGet(w, r)
 				return
 			}
-		case "OPTIONS":
+		case fsthttp.MethodOptions:
 			handleOptions(w, r)
 			return
 		}
