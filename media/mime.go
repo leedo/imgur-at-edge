@@ -27,6 +27,10 @@ func GetMimeType(ext string) (string, bool) {
 	return mime, ok
 }
 
+func GetExtensions() []string {
+	return exts
+}
+
 var magic = map[string][]validator{
 	"png": {
 		{[]byte{0x89, 0x50, 0x4E, 0x47}, 0},
@@ -51,3 +55,5 @@ var magic = map[string][]validator{
 		{[]byte{0x66, 0x74, 0x79, 0x70, 0x71, 0x74, 0x20, 0x20}, 4},
 	},
 }
+
+var exts = []string{"png", "gif", "jpg", "mp4", "mov"}

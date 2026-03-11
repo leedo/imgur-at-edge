@@ -10,6 +10,7 @@ import (
 	"os"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"imgur-at-edge/media"
@@ -25,7 +26,7 @@ const (
 	kvstoreName = "images"
 )
 
-var getPath = regexp.MustCompile(`^/[a-zA-Z0-9]+\.(?:jpg|png|gif|mp4|mov)$`)
+var getPath = regexp.MustCompile(`^/[a-zA-Z0-9]+\.(?:` + strings.Join(media.GetExtensions(), "|") + `)$`)
 
 func main() {
 	fmt.Println("FASTLY_SERVICE_VERSION:", os.Getenv("FASTLY_SERVICE_VERSION"))
@@ -33,123 +34,137 @@ func main() {
 	fsthttp.ServeFunc(func(ctx context.Context, w fsthttp.ResponseWriter, r *fsthttp.Request) {
 		if r.Method == "PUT" {
 			if r.URL.Path == "/" {
-				// validate type
-				ext, ok := media.GetExtension(r.Header.Get("Content-Type"))
-				if !ok {
-					badRequest(w, "unknown content-type")
-					return
-				}
-
-				if err := checkContentLength(r.Header.Get("Content-Length")); err != nil {
-					badRequest(w, err.Error())
-					return
-				}
-
-				v, err := media.NewValidMediaReader(r.Body, ext)
-				if err != nil {
-					internalError(w, err.Error())
-					return
-				}
-
-				defer v.Close()
-
-				if err := v.Validate(); err != nil {
-					var validatorErr media.ValidatorError
-					if errors.As(err, &validatorErr) {
-						badRequest(w, validatorErr.Error())
-						return
-					}
-					internalError(w, "error validating: "+err.Error())
-					return
-				}
-
-				s, err := kvstore.Open(kvstoreName)
-				if err != nil {
-					internalError(w, "error opening: "+err.Error())
-					return
-				}
-
-				if err := s.Insert(v.Hash, v); err != nil {
-					internalError(w, "error inserting: "+err.Error())
-					return
-				}
-
-				w.Header().Add("Content-Type", jsonType)
-
-				if origin := r.Header.Get("Origin"); origin != "" {
-					w.Header().Add("Access-Control-Allow-Origin", origin)
-				}
-
-				w.WriteHeader(fsthttp.StatusOK)
-				const js = `{"status": "ok", "data": {"id": "%s", "link": "https://%s/%s.%s"}}`
-				fmt.Fprintf(w, js, v.Hash, r.URL.Host, v.Hash, ext)
+				handlePut(w, r)
 				return
 			}
 		} else if r.Method == "GET" {
 			if getPath.MatchString(r.URL.Path) {
-				file := r.URL.Path[1:]
-				id := file[:len(file)-4]
-				ext := file[len(file)-3:]
-				mime, ok := media.GetMimeType(ext)
-				if !ok {
-					badRequest(w, "unknown extension "+ext)
-					return
-				}
-
-				w.Header().Set("X-Cache", "HIT")
-
-				res, err := simple.GetOrSet([]byte(id), func() (simple.CacheEntry, error) {
-					s, err := kvstore.Open(kvstoreName)
-					if err != nil {
-						return simple.CacheEntry{}, err
-					}
-
-					res, err := s.Lookup(string(id))
-					if err != nil {
-						return simple.CacheEntry{}, err
-					}
-
-					w.Header().Set("X-Cache", "MISS")
-
-					return simple.CacheEntry{
-						Body: res,
-						TTL:  24 * time.Hour,
-					}, nil
-				})
-
-				if err != nil {
-					if err == kvstore.ErrKeyNotFound {
-						notFoundError(w)
-						return
-					}
-					internalError(w, err.Error())
-					return
-				}
-
-				w.Header().Add("Content-Type", mime)
-				w.WriteHeader(fsthttp.StatusOK)
-				io.Copy(w, res)
+				handleGet(w, r)
 				return
 			}
 		} else if r.Method == "OPTIONS" {
-			origin := r.Header.Get("Origin")
-			headers := r.Header.Get("Access-Control-Request-Headers")
-			methods := r.Header.Get("Access-Control-Request-Method")
-
-			if origin != "" && headers != "" && methods != "" {
-				w.Header().Add("Access-Control-Allow-Origin", origin)
-				w.Header().Add("Access-Control-Allow-Methods", "GET,HEAD,PUT,OPTIONS")
-				w.Header().Add("Access-Control-Allow-Headers", headers)
-				w.Header().Add("Access-Control-Max-Age", "86400")
-				w.WriteHeader(fsthttp.StatusOK)
-			} else {
-				w.WriteHeader(fsthttp.StatusBadRequest)
-			}
+			handleOptions(w, r)
 			return
 		}
 
 		notFoundError(w)
 	})
+}
+
+func handlePut(w fsthttp.ResponseWriter, r *fsthttp.Request) {
+	ext, ok := media.GetExtension(r.Header.Get("Content-Type"))
+	if !ok {
+		badRequest(w, "unknown content-type")
+		return
+	}
+
+	if err := checkContentLength(r.Header.Get("Content-Length")); err != nil {
+		badRequest(w, err.Error())
+		return
+	}
+
+	v, err := media.NewValidMediaReader(r.Body, ext)
+	if err != nil {
+		internalError(w, err.Error())
+		return
+	}
+
+	defer v.Close()
+
+	if err := v.Validate(); err != nil {
+		var validatorErr media.ValidatorError
+		if errors.As(err, &validatorErr) {
+			badRequest(w, validatorErr.Error())
+			return
+		}
+		internalError(w, "error validating: "+err.Error())
+		return
+	}
+
+	s, err := kvstore.Open(kvstoreName)
+	if err != nil {
+		internalError(w, "error opening: "+err.Error())
+		return
+	}
+
+	if err := s.Insert(v.Hash, v); err != nil {
+		internalError(w, "error inserting: "+err.Error())
+		return
+	}
+
+	w.Header().Add("Content-Type", jsonType)
+
+	if origin := r.Header.Get("Origin"); origin != "" {
+		w.Header().Add("Access-Control-Allow-Origin", origin)
+	}
+
+	w.WriteHeader(fsthttp.StatusOK)
+	const js = `{"status": "ok", "data": {"id": "%s", "link": "https://%s/%s.%s"}}`
+	fmt.Fprintf(w, js, v.Hash, r.URL.Host, v.Hash, ext)
+	return
+}
+
+func handleGet(w fsthttp.ResponseWriter, r *fsthttp.Request) {
+	file := r.URL.Path[1:]
+	id := file[:len(file)-4]
+	ext := file[len(file)-3:]
+	mime, ok := media.GetMimeType(ext)
+	if !ok {
+		badRequest(w, "unknown extension "+ext)
+		return
+	}
+
+	w.Header().Set("X-Cache", "HIT")
+
+	res, err := simple.GetOrSet([]byte(id), func() (simple.CacheEntry, error) {
+		s, err := kvstore.Open(kvstoreName)
+		if err != nil {
+			return simple.CacheEntry{}, err
+		}
+
+		res, err := s.Lookup(string(id))
+		if err != nil {
+			return simple.CacheEntry{}, err
+		}
+
+		w.Header().Set("X-Cache", "MISS")
+
+		return simple.CacheEntry{
+			Body: res,
+			TTL:  24 * time.Hour,
+		}, nil
+	})
+
+	if err != nil {
+		if err == kvstore.ErrKeyNotFound {
+			notFoundError(w)
+			return
+		}
+		internalError(w, err.Error())
+		return
+	}
+
+	w.Header().Add("Content-Type", mime)
+	w.WriteHeader(fsthttp.StatusOK)
+	io.Copy(w, res)
+	return
+}
+
+func handleOptions(w fsthttp.ResponseWriter, r *fsthttp.Request) {
+	origin := r.Header.Get("Origin")
+	headers := r.Header.Get("Access-Control-Request-Headers")
+	methods := r.Header.Get("Access-Control-Request-Method")
+
+	if origin != "" && headers != "" && methods != "" {
+		w.Header().Add("Access-Control-Allow-Origin", origin)
+		w.Header().Add("Access-Control-Allow-Methods", "GET,HEAD,PUT,OPTIONS")
+		w.Header().Add("Access-Control-Allow-Headers", headers)
+		w.Header().Add("Access-Control-Max-Age", "86400")
+		w.WriteHeader(fsthttp.StatusOK)
+	} else {
+		w.WriteHeader(fsthttp.StatusBadRequest)
+	}
+	return
 }
 
 func badRequest(w fsthttp.ResponseWriter, msg string) {
