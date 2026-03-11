@@ -1,10 +1,7 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha1"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,178 +12,20 @@ import (
 	"strconv"
 	"time"
 
+	"imgur-at-edge/media"
+
 	"github.com/fastly/compute-sdk-go/cache/simple"
 	"github.com/fastly/compute-sdk-go/fsthttp"
 	"github.com/fastly/compute-sdk-go/kvstore"
 )
 
 const (
-	minValidationLen = 1024
-	maxLength        = 1024 * 1024 * 25
+	maxLength   = 1024 * 1024 * 25
+	jsonType    = "application/json"
+	kvstoreName = "images"
 )
 
-var types = map[string]string{
-	"image/jpeg":      "jpg",
-	"image/gif":       "gif",
-	"image/x-png":     "png",
-	"image/png":       "png",
-	"video/quicktime": "mov",
-	"video/mp4":       "mp4",
-}
-
-var mimes = map[string]string{
-	"jpg": "image/jpeg",
-	"gif": "image/gif",
-	"png": "image/png",
-	"mov": "video/quicktime",
-	"mp4": "video/mp4",
-}
-
-type validator struct {
-	bytes  []byte
-	offset uint32
-}
-
-var magic = map[string][]validator{
-	"png": []validator{
-		validator{[]byte{0x89, 0x50, 0x4E, 0x47}, 0},
-	},
-	"gif": []validator{
-		validator{[]byte{0x47, 0x49, 0x46, 0x38, 0x37, 0x61}, 0},
-		validator{[]byte{0x47, 0x49, 0x46, 0x38, 0x39, 0x61}, 0},
-	},
-	"jpg": []validator{
-		validator{[]byte{0xFF, 0xD8, 0xFF, 0xDB}, 0},
-		validator{[]byte{0xFF, 0xD8, 0xFF, 0xE0}, 0},
-		validator{[]byte{0xFF, 0xD8, 0xFF, 0xEE}, 0},
-		validator{[]byte{0xFF, 0xD8, 0xFF, 0xE1}, 0},
-	},
-	"mp4": []validator{
-		validator{[]byte{0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6F, 0x6D}, 4},
-		validator{[]byte{0x66, 0x74, 0x79, 0x70, 0x4D, 0x53, 0x4E, 0x56}, 4},
-		validator{[]byte{0x66, 0x74, 0x79, 0x70, 0x69, 0x73}, 4},
-		validator{[]byte{0x66, 0x74, 0x79, 0x70, 0x6D, 0x70}, 4},
-	},
-	"mov": []validator{
-		validator{[]byte{0x66, 0x74, 0x79, 0x70, 0x71, 0x74, 0x20, 0x20}, 4},
-	},
-}
-
-func (v validator) validate(b []byte) bool {
-	return bytes.Equal(b[v.offset:int(v.offset)+len(v.bytes)], v.bytes)
-}
-
-type ValidatorError struct {
-	kind string
-}
-
-func (e ValidatorError) Error() string {
-	return "invalid " + e.kind
-}
-
-type ValidMediaReader struct {
-	reader     io.ReadCloser
-	validators []validator
-	buf        []byte
-	validated  bool
-	kind       string
-	name       string
-	eof        bool
-	hash       string
-}
-
-var ErrMustValidate = errors.New("must call Validate before Read")
-
-func (v *ValidMediaReader) Read(p []byte) (int, error) {
-	if !v.validated {
-		return 0, ErrMustValidate
-	}
-
-	if len(v.buf) > 0 {
-		// todo check p capacity
-		n := copy(p, v.buf)
-		v.buf = nil
-		return n, nil
-	}
-
-	if v.eof {
-		return 0, io.EOF
-	}
-
-	return v.reader.Read(p)
-}
-
-func (v *ValidMediaReader) Validate() error {
-	sha := sha1.New()
-	r := io.TeeReader(v.reader, sha)
-
-	b := make([]byte, minValidationLen)
-	var n int
-	var err error
-
-	for n < minValidationLen && err == nil {
-		var nn int
-		nn, err = r.Read(b[n:])
-		n += nn
-	}
-	if err != nil {
-		if n > 0 && err == io.EOF {
-			// swallow eof error for returning from Read call
-			v.eof = true
-		} else {
-			return err
-		}
-	}
-
-	v.hash = hex.EncodeToString(sha.Sum(nil))
-	v.validated = true
-
-	for _, validator := range v.validators {
-		if ok := validator.validate(b); ok {
-			v.buf = b
-			return nil
-		}
-	}
-	return ValidatorError{v.kind}
-}
-
-func (v *ValidMediaReader) Close() error {
-	return v.reader.Close()
-}
-
-func NewValidMediaReader(r io.ReadCloser, validators []validator, kind string) *ValidMediaReader {
-	return &ValidMediaReader{
-		reader:     r,
-		validators: validators,
-		kind:       kind,
-	}
-}
-
 var getPath = regexp.MustCompile(`^/[a-zA-Z0-9]+\.(?:jpg|png|gif|mp4|mov)$`)
-
-func badRequest(w fsthttp.ResponseWriter, msg string) {
-	jsonError(w, fsthttp.StatusBadRequest, msg)
-}
-
-func internalError(w fsthttp.ResponseWriter, msg string) {
-	log.Println(msg)
-	jsonError(w, fsthttp.StatusInternalServerError, "internal error")
-}
-
-func notFoundError(w fsthttp.ResponseWriter) {
-	jsonError(w, fsthttp.StatusNotFound, "not found")
-}
-
-func jsonError(w fsthttp.ResponseWriter, status int, msg string) {
-	type jsError struct {
-		Err string `json:"error"`
-	}
-	w.Header().Add("Content-Type", "application/json")
-	w.WriteHeader(fsthttp.StatusBadRequest)
-	if err := json.NewEncoder(w).Encode(jsError{msg}); err != nil {
-		log.Printf("error writing error: %s", err)
-	}
-}
 
 func main() {
 	fmt.Println("FASTLY_SERVICE_VERSION:", os.Getenv("FASTLY_SERVICE_VERSION"))
@@ -195,40 +34,27 @@ func main() {
 		if r.Method == "PUT" {
 			if r.URL.Path == "/" {
 				// validate type
-				cType := r.Header.Get("Content-Type")
-				ext, extOk := types[cType]
-				if !extOk {
+				ext, ok := media.GetExtension(r.Header.Get("Content-Type"))
+				if !ok {
 					badRequest(w, "unknown content-type")
 					return
 				}
 
-				validators, ok := magic[ext]
-				if !ok {
-					internalError(w, "no validators for "+ext)
+				if err := checkContentLength(r.Header.Get("Content-Length")); err != nil {
+					badRequest(w, err.Error())
 					return
 				}
 
-				// validate length
-				cLen := r.Header.Get("Content-Length")
-				if cLen == "" {
-					badRequest(w, "missing content-length")
-					return
-				}
-				u, err := strconv.ParseUint(cLen, 10, 64)
+				v, err := media.NewValidMediaReader(r.Body, ext)
 				if err != nil {
-					badRequest(w, "invalid content-length")
-					return
-				}
-				if u > maxLength {
-					badRequest(w, "content-length too large")
+					internalError(w, err.Error())
 					return
 				}
 
-				v := NewValidMediaReader(r.Body, validators, ext)
 				defer v.Close()
 
 				if err := v.Validate(); err != nil {
-					var validatorErr ValidatorError
+					var validatorErr media.ValidatorError
 					if errors.As(err, &validatorErr) {
 						badRequest(w, validatorErr.Error())
 						return
@@ -237,18 +63,18 @@ func main() {
 					return
 				}
 
-				s, err := kvstore.Open("images")
+				s, err := kvstore.Open(kvstoreName)
 				if err != nil {
 					internalError(w, "error opening: "+err.Error())
 					return
 				}
 
-				if err := s.Insert(v.hash, v); err != nil {
+				if err := s.Insert(v.Hash, v); err != nil {
 					internalError(w, "error inserting: "+err.Error())
 					return
 				}
 
-				w.Header().Add("Content-Type", "application/json")
+				w.Header().Add("Content-Type", jsonType)
 
 				if origin := r.Header.Get("Origin"); origin != "" {
 					w.Header().Add("Access-Control-Allow-Origin", origin)
@@ -256,7 +82,7 @@ func main() {
 
 				w.WriteHeader(fsthttp.StatusOK)
 				const js = `{"status": "ok", "data": {"id": "%s", "link": "https://%s/%s.%s"}}`
-				fmt.Fprintf(w, js, v.hash, r.URL.Host, v.hash, ext)
+				fmt.Fprintf(w, js, v.Hash, r.URL.Host, v.Hash, ext)
 				return
 			}
 		} else if r.Method == "GET" {
@@ -264,7 +90,7 @@ func main() {
 				file := r.URL.Path[1:]
 				id := file[:len(file)-4]
 				ext := file[len(file)-3:]
-				mime, ok := mimes[ext]
+				mime, ok := media.GetMimeType(ext)
 				if !ok {
 					badRequest(w, "unknown extension "+ext)
 					return
@@ -273,7 +99,7 @@ func main() {
 				w.Header().Set("X-Cache", "HIT")
 
 				res, err := simple.GetOrSet([]byte(id), func() (simple.CacheEntry, error) {
-					s, err := kvstore.Open("images")
+					s, err := kvstore.Open(kvstoreName)
 					if err != nil {
 						return simple.CacheEntry{}, err
 					}
@@ -324,4 +150,45 @@ func main() {
 
 		notFoundError(w)
 	})
+}
+
+func badRequest(w fsthttp.ResponseWriter, msg string) {
+	jsonError(w, fsthttp.StatusBadRequest, msg)
+}
+
+func internalError(w fsthttp.ResponseWriter, msg string) {
+	log.Println(msg)
+	jsonError(w, fsthttp.StatusInternalServerError, "internal error")
+}
+
+func notFoundError(w fsthttp.ResponseWriter) {
+	jsonError(w, fsthttp.StatusNotFound, "not found")
+}
+
+func jsonError(w fsthttp.ResponseWriter, status int, msg string) {
+	type jsError struct {
+		Err string `json:"error"`
+	}
+	w.Header().Add("Content-Type", jsonType)
+	w.WriteHeader(fsthttp.StatusBadRequest)
+	if err := json.NewEncoder(w).Encode(jsError{msg}); err != nil {
+		log.Printf("error writing error: %s", err)
+	}
+}
+
+func checkContentLength(cLen string) error {
+	if cLen == "" {
+		return errors.New("missing content-length")
+	}
+
+	u, err := strconv.ParseUint(cLen, 10, 64)
+	if err != nil {
+		return errors.New("invalid content-length")
+	}
+
+	if u > maxLength {
+		return errors.New("content-length too large")
+	}
+
+	return nil
 }

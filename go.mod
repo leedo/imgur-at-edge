@@ -1,4 +1,4 @@
-module compute-starter-kit-go
+module imgur-at-edge
 
 go 1.23.12
 
