@@ -170,7 +170,7 @@ func (a *App) Router() *mux.Router {
 		Methods("PUT").
 		HandlerFunc(a.putHandler())
 
-	r.Path(`/{hash:[a-zA-Z0-9]+}.{ext:(?:` + strings.Join(media.GetExtensions(), "|") + `)}`).
+	r.Path(`/{hash:[a-zA-Z0-9]{32,40}}.{ext:(?:` + strings.Join(media.GetExtensions(), "|") + `)}`).
 		Methods("GET").
 		HandlerFunc(a.getHandler())
 
