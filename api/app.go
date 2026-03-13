@@ -7,11 +7,13 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/fastly/compute-sdk-go/cache/simple"
 	"github.com/fastly/compute-sdk-go/fsthttp"
 	"github.com/fastly/compute-sdk-go/kvstore"
+	"github.com/gorilla/mux"
 )
 
 const jsonType = "application/json"
@@ -78,9 +80,10 @@ func (a *App) putHandler() func(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) getHandler() func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
-		file := r.URL.Path[1:]
-		id := file[:len(file)-4]
-		ext := file[len(file)-3:]
+		vars := mux.Vars(r)
+		hash := vars["hash"]
+		ext := vars["ext"]
+
 		mime, ok := media.GetMimeType(ext)
 		if !ok {
 			badRequest(w, "unknown extension "+ext)
@@ -89,13 +92,13 @@ func (a *App) getHandler() func(w http.ResponseWriter, r *http.Request) {
 
 		w.Header().Set("X-Cache", "HIT")
 
-		res, err := simple.GetOrSet([]byte(id), func() (simple.CacheEntry, error) {
+		res, err := simple.GetOrSet([]byte(hash), func() (simple.CacheEntry, error) {
 			s, err := kvstore.Open(a.KVStoreName)
 			if err != nil {
 				return simple.CacheEntry{}, err
 			}
 
-			res, err := s.Lookup(string(id))
+			res, err := s.Lookup(string(hash))
 			if err != nil {
 				return simple.CacheEntry{}, err
 			}
@@ -160,12 +163,24 @@ func (a *App) checkContentLength(cLen string) error {
 	return nil
 }
 
-func (a *App) NewServeMux() *http.ServeMux {
+func (a *App) Router() *mux.Router {
+	r := mux.NewRouter()
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("PUT /{$}", a.putHandler())
-	mux.HandleFunc("GET /{hash}.{ext}", a.getHandler())
-	mux.HandleFunc("OPTIONS /{$}", a.optionsHandler())
+	r.Path("/").
+		Methods("PUT").
+		HandlerFunc(a.putHandler())
 
-	return mux
+	r.Path(`/{hash:[a-zA-Z0-9]+}.{ext:(?:` + strings.Join(media.GetExtensions(), "|") + `)}`).
+		Methods("GET").
+		HandlerFunc(a.getHandler())
+
+	r.Path("/").
+		Methods("OPTIONS").
+		HandlerFunc(a.optionsHandler())
+
+	r.NotFoundHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		notFoundError(w)
+	})
+
+	return r
 }

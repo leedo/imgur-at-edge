@@ -16,5 +16,5 @@ func main() {
 		KVStoreName: "images",
 	}
 
-	fsthttp.Serve(fsthttp.Adapt(app.NewServeMux()))
+	fsthttp.Serve(fsthttp.Adapt(app.Router()))
 }
