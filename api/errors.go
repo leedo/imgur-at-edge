@@ -24,7 +24,7 @@ func jsonError(w http.ResponseWriter, status int, msg string) {
 		Err string `json:"error"`
 	}
 	w.Header().Add("Content-Type", jsonType)
-	w.WriteHeader(http.StatusBadRequest)
+	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(jsError{msg}); err != nil {
 		log.Printf("error writing error: %s", err)
 	}
