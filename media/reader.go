@@ -7,14 +7,17 @@ import (
 	"io"
 )
 
+const defaultValidateLength = 1024
+
 type ValidMediaReader struct {
-	reader     io.ReadCloser
-	validators []validator
-	buf        []byte
-	validated  bool
-	kind       string
-	eof        bool
-	Hash       string
+	reader         io.ReadCloser
+	validators     []validator
+	buf            []byte
+	validated      bool
+	kind           string
+	eof            bool
+	ValidateLength int
+	Hash           string
 }
 
 var ErrMustValidate = errors.New("must call Validate before Read")
@@ -42,11 +45,11 @@ func (v *ValidMediaReader) Validate() error {
 	sha := sha1.New()
 	r := io.TeeReader(v.reader, sha)
 
-	b := make([]byte, minValidationLen)
+	b := make([]byte, v.ValidateLength)
 	var n int
 	var err error
 
-	for n < minValidationLen && err == nil {
+	for n < v.ValidateLength && err == nil {
 		var nn int
 		nn, err = r.Read(b[n:])
 		n += nn
@@ -82,8 +85,9 @@ func NewValidMediaReader(r io.ReadCloser, kind string) (*ValidMediaReader, error
 		return nil, errors.New("no validators for " + kind)
 	}
 	return &ValidMediaReader{
-		reader:     r,
-		validators: validators,
-		kind:       kind,
+		reader:         r,
+		validators:     validators,
+		kind:           kind,
+		ValidateLength: defaultValidateLength,
 	}, nil
 }

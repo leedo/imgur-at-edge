@@ -2,8 +2,6 @@ package media
 
 import "bytes"
 
-const minValidationLen = 1024
-
 type validator struct {
 	bytes  []byte
 	offset uint32
