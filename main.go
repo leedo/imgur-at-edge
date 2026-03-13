@@ -1,12 +1,12 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"os"
 	"regexp"
 	"strconv"
@@ -31,28 +31,14 @@ var getPath = regexp.MustCompile(`^/[a-zA-Z0-9]+\.(?:` + strings.Join(media.GetE
 func main() {
 	fmt.Println("FASTLY_SERVICE_VERSION:", os.Getenv("FASTLY_SERVICE_VERSION"))
 
-	fsthttp.ServeFunc(func(ctx context.Context, w fsthttp.ResponseWriter, r *fsthttp.Request) {
-		switch r.Method {
-		case fsthttp.MethodPut:
-			if r.URL.Path == "/" {
-				handlePut(w, r)
-				return
-			}
-		case fsthttp.MethodGet:
-			if getPath.MatchString(r.URL.Path) {
-				handleGet(w, r)
-				return
-			}
-		case fsthttp.MethodOptions:
-			handleOptions(w, r)
-			return
-		}
-
-		notFoundError(w)
-	})
+	mux := http.NewServeMux()
+	mux.HandleFunc("PUT /{$}", handlePut)
+	mux.HandleFunc("GET /{name}", handleGet)
+	mux.HandleFunc("OPTIONS /{$}", handleOptions)
+	fsthttp.Serve(fsthttp.Adapt(mux))
 }
 
-func handlePut(w fsthttp.ResponseWriter, r *fsthttp.Request) {
+func handlePut(w http.ResponseWriter, r *http.Request) {
 	ext, ok := media.GetExtension(r.Header.Get("Content-Type"))
 	if !ok {
 		badRequest(w, "unknown content-type")
@@ -105,7 +91,7 @@ func handlePut(w fsthttp.ResponseWriter, r *fsthttp.Request) {
 	return
 }
 
-func handleGet(w fsthttp.ResponseWriter, r *fsthttp.Request) {
+func handleGet(w http.ResponseWriter, r *http.Request) {
 	file := r.URL.Path[1:]
 	id := file[:len(file)-4]
 	ext := file[len(file)-3:]
@@ -146,12 +132,12 @@ func handleGet(w fsthttp.ResponseWriter, r *fsthttp.Request) {
 	}
 
 	w.Header().Add("Content-Type", mime)
-	w.WriteHeader(fsthttp.StatusOK)
+	w.WriteHeader(http.StatusOK)
 	io.Copy(w, res)
 	return
 }
 
-func handleOptions(w fsthttp.ResponseWriter, r *fsthttp.Request) {
+func handleOptions(w http.ResponseWriter, r *http.Request) {
 	origin := r.Header.Get("Origin")
 	headers := r.Header.Get("Access-Control-Request-Headers")
 	methods := r.Header.Get("Access-Control-Request-Method")
@@ -161,32 +147,32 @@ func handleOptions(w fsthttp.ResponseWriter, r *fsthttp.Request) {
 		w.Header().Add("Access-Control-Allow-Methods", "GET,HEAD,PUT,OPTIONS")
 		w.Header().Add("Access-Control-Allow-Headers", headers)
 		w.Header().Add("Access-Control-Max-Age", "86400")
-		w.WriteHeader(fsthttp.StatusOK)
+		w.WriteHeader(http.StatusOK)
 	} else {
-		w.WriteHeader(fsthttp.StatusBadRequest)
+		w.WriteHeader(http.StatusBadRequest)
 	}
 	return
 }
 
-func badRequest(w fsthttp.ResponseWriter, msg string) {
-	jsonError(w, fsthttp.StatusBadRequest, msg)
+func badRequest(w http.ResponseWriter, msg string) {
+	jsonError(w, http.StatusBadRequest, msg)
 }
 
-func internalError(w fsthttp.ResponseWriter, msg string) {
+func internalError(w http.ResponseWriter, msg string) {
 	log.Println(msg)
-	jsonError(w, fsthttp.StatusInternalServerError, "internal error")
+	jsonError(w, http.StatusInternalServerError, "internal error")
 }
 
-func notFoundError(w fsthttp.ResponseWriter) {
-	jsonError(w, fsthttp.StatusNotFound, "not found")
+func notFoundError(w http.ResponseWriter) {
+	jsonError(w, http.StatusNotFound, "not found")
 }
 
-func jsonError(w fsthttp.ResponseWriter, status int, msg string) {
+func jsonError(w http.ResponseWriter, status int, msg string) {
 	type jsError struct {
 		Err string `json:"error"`
 	}
 	w.Header().Add("Content-Type", jsonType)
-	w.WriteHeader(fsthttp.StatusBadRequest)
+	w.WriteHeader(http.StatusBadRequest)
 	if err := json.NewEncoder(w).Encode(jsError{msg}); err != nil {
 		log.Printf("error writing error: %s", err)
 	}
