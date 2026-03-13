@@ -8,9 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"regexp"
 	"strconv"
-	"strings"
 	"time"
 
 	"imgur-at-edge/media"
@@ -26,14 +24,12 @@ const (
 	kvstoreName = "images"
 )
 
-var getPath = regexp.MustCompile(`^/[a-zA-Z0-9]+\.(?:` + strings.Join(media.GetExtensions(), "|") + `)$`)
-
 func main() {
 	fmt.Println("FASTLY_SERVICE_VERSION:", os.Getenv("FASTLY_SERVICE_VERSION"))
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("PUT /{$}", handlePut)
-	mux.HandleFunc("GET /{name}", handleGet)
+	mux.HandleFunc("GET /{hash}.{ext}", handleGet)
 	mux.HandleFunc("OPTIONS /{$}", handleOptions)
 	fsthttp.Serve(fsthttp.Adapt(mux))
 }
