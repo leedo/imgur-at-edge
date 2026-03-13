@@ -1,12 +1,10 @@
 package api
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"imgur-at-edge/media"
 	"io"
-	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -23,7 +21,7 @@ type App struct {
 	KVStoreName string
 }
 
-func (a *App) handlePut() func(w http.ResponseWriter, r *http.Request) {
+func (a *App) putHandler() func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ext, ok := media.GetExtension(r.Header.Get("Content-Type"))
 		if !ok {
@@ -78,7 +76,7 @@ func (a *App) handlePut() func(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (a *App) handleGet() func(w http.ResponseWriter, r *http.Request) {
+func (a *App) getHandler() func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		file := r.URL.Path[1:]
 		id := file[:len(file)-4]
@@ -126,7 +124,7 @@ func (a *App) handleGet() func(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (a *App) handleOptions() func(w http.ResponseWriter, r *http.Request) {
+func (a *App) optionsHandler() func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
 		headers := r.Header.Get("Access-Control-Request-Headers")
@@ -142,30 +140,6 @@ func (a *App) handleOptions() func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusBadRequest)
 		}
 		return
-	}
-}
-
-func badRequest(w http.ResponseWriter, msg string) {
-	jsonError(w, http.StatusBadRequest, msg)
-}
-
-func internalError(w http.ResponseWriter, msg string) {
-	log.Println(msg)
-	jsonError(w, http.StatusInternalServerError, "internal error")
-}
-
-func notFoundError(w http.ResponseWriter) {
-	jsonError(w, http.StatusNotFound, "not found")
-}
-
-func jsonError(w http.ResponseWriter, status int, msg string) {
-	type jsError struct {
-		Err string `json:"error"`
-	}
-	w.Header().Add("Content-Type", jsonType)
-	w.WriteHeader(http.StatusBadRequest)
-	if err := json.NewEncoder(w).Encode(jsError{msg}); err != nil {
-		log.Printf("error writing error: %s", err)
 	}
 }
 
@@ -189,9 +163,9 @@ func (a *App) checkContentLength(cLen string) error {
 func (a *App) NewServeMux() *http.ServeMux {
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("PUT /{$}", a.handlePut())
-	mux.HandleFunc("GET /{hash}.{ext}", a.handleGet())
-	mux.HandleFunc("OPTIONS /{$}", a.handleOptions())
+	mux.HandleFunc("PUT /{$}", a.putHandler())
+	mux.HandleFunc("GET /{hash}.{ext}", a.getHandler())
+	mux.HandleFunc("OPTIONS /{$}", a.optionsHandler())
 
 	return mux
 }
