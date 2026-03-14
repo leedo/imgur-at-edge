@@ -18,8 +18,8 @@ import (
 const jsonType = "application/json"
 
 type App struct {
-	MaxLength   uint64
-	KVStoreName string
+	MaxLength uint64
+	KVStore   *kvstore.Store
 }
 
 func (a *App) putHandler() func(w http.ResponseWriter, r *http.Request) {
@@ -53,12 +53,6 @@ func (a *App) putHandler() func(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		s, err := kvstore.Open(a.KVStoreName)
-		if err != nil {
-			internalError(w, "error opening: "+err.Error())
-			return
-		}
-
 		sendOK := func() {
 			w.Header().Add("Content-Type", jsonType)
 
@@ -72,13 +66,13 @@ func (a *App) putHandler() func(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintf(w, js, v.Hash, r.URL.Host, v.Hash, ext)
 		}
 
-		if _, err := s.Lookup(v.Hash); err == nil {
+		if _, err := a.KVStore.Lookup(v.Hash); err == nil {
 			io.Copy(io.Discard, v)
 			sendOK()
 			return
 		}
 
-		if err := s.Insert(v.Hash, v); err != nil {
+		if err := a.KVStore.Insert(v.Hash, v); err != nil {
 			internalError(w, "error inserting: "+err.Error())
 			return
 		}
@@ -103,12 +97,7 @@ func (a *App) getHandler() func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Cache", "HIT")
 
 		res, err := simple.GetOrSet([]byte(hash), func() (simple.CacheEntry, error) {
-			s, err := kvstore.Open(a.KVStoreName)
-			if err != nil {
-				return simple.CacheEntry{}, err
-			}
-
-			res, err := s.Lookup(string(hash))
+			res, err := a.KVStore.Lookup(string(hash))
 			if err != nil {
 				return simple.CacheEntry{}, err
 			}
