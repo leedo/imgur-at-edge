@@ -17,6 +17,13 @@ import (
 
 const jsonType = "application/json"
 
+var (
+	ErrMissingContentLength  = errors.New("missing content-length")
+	ErrInvalidContentLength  = errors.New("invalid content-length")
+	ErrContentLengthTooLarge = errors.New("content-length too large")
+	ErrUnknownContentType    = errors.New("unknown content-type")
+)
+
 type App struct {
 	MaxLength uint64
 	KVStore   *kvstore.Store
@@ -26,7 +33,7 @@ func (a *App) putHandler() func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ext, ok := media.GetExtension(r.Header.Get("Content-Type"))
 		if !ok {
-			badRequest(w, "unknown content-type")
+			badRequest(w, ErrUnknownContentType.Error())
 			return
 		}
 
@@ -147,16 +154,16 @@ func (a *App) optionsHandler() func(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) checkContentLength(cLen string) error {
 	if cLen == "" {
-		return errors.New("missing content-length")
+		return ErrMissingContentLength
 	}
 
 	u, err := strconv.ParseUint(cLen, 10, 64)
 	if err != nil {
-		return errors.New("invalid content-length")
+		return ErrInvalidContentLength
 	}
 
 	if u > a.MaxLength {
-		return errors.New("content-length too large")
+		return ErrContentLengthTooLarge
 	}
 
 	return nil

@@ -20,7 +20,10 @@ type ValidMediaReader struct {
 	Hash           string
 }
 
-var ErrMustValidate = errors.New("must call Validate before Read")
+var (
+	ErrMustValidate        = errors.New("must call Validate before Read")
+	ErrNoValidatorsForType = errors.New("no validators for extension")
+)
 
 func (v *ValidMediaReader) Read(p []byte) (int, error) {
 	if !v.validated {
@@ -82,7 +85,7 @@ func (v *ValidMediaReader) Close() error {
 func NewValidMediaReader(r io.ReadCloser, kind string) (*ValidMediaReader, error) {
 	validators, ok := magic[kind]
 	if !ok {
-		return nil, errors.New("no validators for " + kind)
+		return nil, ErrNoValidatorsForType
 	}
 	return &ValidMediaReader{
 		reader:         r,
