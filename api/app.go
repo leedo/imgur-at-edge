@@ -73,6 +73,7 @@ func (a *App) putHandler() func(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if _, err := s.Lookup(v.Hash); err == nil {
+			io.Copy(io.Discard, v)
 			sendOK()
 			return
 		}
