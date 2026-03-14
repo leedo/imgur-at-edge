@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/fastly/compute-sdk-go/cache/simple"
-	"github.com/fastly/compute-sdk-go/fsthttp"
 	"github.com/fastly/compute-sdk-go/kvstore"
 	"github.com/gorilla/mux"
 )
@@ -60,20 +59,30 @@ func (a *App) putHandler() func(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		sendOK := func() {
+			w.Header().Add("Content-Type", jsonType)
+
+			if origin := r.Header.Get("Origin"); origin != "" {
+				w.Header().Add("Access-Control-Allow-Origin", origin)
+			}
+
+			w.WriteHeader(http.StatusOK)
+
+			const js = `{"status": "ok", "data": {"id": "%s", "link": "https://%s/%s.%s"}}`
+			fmt.Fprintf(w, js, v.Hash, r.URL.Host, v.Hash, ext)
+		}
+
+		if _, err := s.Lookup(v.Hash); err == nil {
+			sendOK()
+			return
+		}
+
 		if err := s.Insert(v.Hash, v); err != nil {
 			internalError(w, "error inserting: "+err.Error())
 			return
 		}
 
-		w.Header().Add("Content-Type", jsonType)
-
-		if origin := r.Header.Get("Origin"); origin != "" {
-			w.Header().Add("Access-Control-Allow-Origin", origin)
-		}
-
-		w.WriteHeader(fsthttp.StatusOK)
-		const js = `{"status": "ok", "data": {"id": "%s", "link": "https://%s/%s.%s"}}`
-		fmt.Fprintf(w, js, v.Hash, r.URL.Host, v.Hash, ext)
+		sendOK()
 		return
 	}
 }
