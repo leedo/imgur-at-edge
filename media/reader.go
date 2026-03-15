@@ -7,7 +7,7 @@ import (
 	"io"
 )
 
-const defaultValidateLength = 1024
+const defaultValidateLength = 1024 * 10
 
 type ValidMediaReader struct {
 	reader         io.ReadCloser
