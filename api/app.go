@@ -60,22 +60,9 @@ func (a *App) putHandler() func(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		sendOK := func() {
-			w.Header().Add("Content-Type", jsonType)
-
-			if origin := r.Header.Get("Origin"); origin != "" {
-				w.Header().Add("Access-Control-Allow-Origin", origin)
-			}
-
-			w.WriteHeader(http.StatusOK)
-
-			const js = `{"status": "ok", "data": {"id": "%s", "link": "https://%s/%s.%s"}}`
-			fmt.Fprintf(w, js, v.Hash, r.URL.Host, v.Hash, ext)
-		}
-
 		if _, err := a.KVStore.Lookup(v.Hash); err == nil {
 			io.Copy(io.Discard, v)
-			sendOK()
+			sendPutOK(w, r, v)
 			return
 		}
 
@@ -84,9 +71,22 @@ func (a *App) putHandler() func(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		sendOK()
+		sendPutOK(w, r, v)
 		return
 	}
+}
+
+func sendPutOK(w http.ResponseWriter, r *http.Request, v *media.ValidMediaReader) {
+	w.Header().Add("Content-Type", jsonType)
+
+	if origin := r.Header.Get("Origin"); origin != "" {
+		w.Header().Add("Access-Control-Allow-Origin", origin)
+	}
+
+	w.WriteHeader(http.StatusOK)
+
+	const js = `{"status": "ok", "data": {"id": "%s", "link": "https://%s/%s"}}`
+	fmt.Fprintf(w, js, v.Hash, r.URL.Host, v.Filename())
 }
 
 func (a *App) getHandler() func(w http.ResponseWriter, r *http.Request) {

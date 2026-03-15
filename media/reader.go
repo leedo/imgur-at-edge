@@ -82,6 +82,10 @@ func (v *ValidMediaReader) Close() error {
 	return v.reader.Close()
 }
 
+func (v *ValidMediaReader) Filename() string {
+	return v.Hash + "." + v.kind
+}
+
 func NewValidMediaReader(r io.ReadCloser, kind string) (*ValidMediaReader, error) {
 	validators, ok := magic[kind]
 	if !ok {
