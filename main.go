@@ -20,8 +20,9 @@ func main() {
 	}
 
 	app := api.App{
-		MaxLength: 1024 * 1024 * 25,
-		KVStore:   s,
+		MaxLength:         1024 * 1024 * 25,
+		ValidateBufLength: 1024 * 10,
+		KVStore:           s,
 	}
 
 	fsthttp.Serve(fsthttp.Adapt(app.Router()))

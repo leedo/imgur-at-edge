@@ -7,17 +7,15 @@ import (
 	"io"
 )
 
-const defaultValidateLength = 1024 * 10
-
 type ValidMediaReader struct {
-	reader         io.ReadCloser
-	validators     []validator
-	buf            []byte
-	validated      bool
-	kind           string
-	eof            bool
-	ValidateLength int
-	Hash           string
+	reader            io.ReadCloser
+	validators        []validator
+	buf               []byte
+	validated         bool
+	kind              string
+	eof               bool
+	ValidateBufLength int
+	Hash              string
 }
 
 var (
@@ -48,11 +46,11 @@ func (v *ValidMediaReader) Validate() error {
 	sha := sha1.New()
 	r := io.TeeReader(v.reader, sha)
 
-	b := make([]byte, v.ValidateLength)
+	b := make([]byte, v.ValidateBufLength)
 	var n int
 	var err error
 
-	for n < v.ValidateLength && err == nil {
+	for n < v.ValidateBufLength && err == nil {
 		var nn int
 		nn, err = r.Read(b[n:])
 		n += nn
@@ -86,15 +84,15 @@ func (v *ValidMediaReader) Filename() string {
 	return v.Hash + "." + v.kind
 }
 
-func NewValidMediaReader(r io.ReadCloser, kind string) (*ValidMediaReader, error) {
+func NewValidMediaReader(r io.ReadCloser, kind string, validateBufLength int) (*ValidMediaReader, error) {
 	validators, ok := magic[kind]
 	if !ok {
 		return nil, ErrNoValidatorsForType
 	}
 	return &ValidMediaReader{
-		reader:         r,
-		validators:     validators,
-		kind:           kind,
-		ValidateLength: defaultValidateLength,
+		reader:            r,
+		validators:        validators,
+		kind:              kind,
+		ValidateBufLength: validateBufLength,
 	}, nil
 }

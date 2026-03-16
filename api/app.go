@@ -25,8 +25,9 @@ var (
 )
 
 type App struct {
-	MaxLength uint64
-	KVStore   *kvstore.Store
+	MaxLength         uint64
+	ValidateBufLength int
+	KVStore           *kvstore.Store
 }
 
 func (a *App) putHandler() func(w http.ResponseWriter, r *http.Request) {
@@ -42,7 +43,7 @@ func (a *App) putHandler() func(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		v, err := media.NewValidMediaReader(r.Body, ext)
+		v, err := media.NewValidMediaReader(r.Body, ext, a.ValidateBufLength)
 		if err != nil {
 			internalError(w, err.Error())
 			return
