@@ -14,7 +14,7 @@ type ValidMediaReader struct {
 	validated         bool
 	kind              string
 	eof               bool
-	ValidateBufLength int
+	validateBufLength int
 	Hash              string
 }
 
@@ -46,11 +46,11 @@ func (v *ValidMediaReader) Validate() error {
 	sha := sha1.New()
 	r := io.TeeReader(v.reader, sha)
 
-	b := make([]byte, v.ValidateBufLength)
+	b := make([]byte, v.validateBufLength)
 	var n int
 	var err error
 
-	for n < v.ValidateBufLength && err == nil {
+	for n < v.validateBufLength && err == nil {
 		var nn int
 		nn, err = r.Read(b[n:])
 		n += nn
@@ -93,6 +93,6 @@ func NewValidMediaReader(r io.ReadCloser, kind string, validateBufLength int) (*
 		reader:            r,
 		validators:        validators,
 		kind:              kind,
-		ValidateBufLength: validateBufLength,
+		validateBufLength: validateBufLength,
 	}, nil
 }
