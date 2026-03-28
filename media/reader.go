@@ -2,9 +2,9 @@ package media
 
 import (
 	"crypto/sha1"
-	"encoding/hex"
 	"errors"
 	"io"
+	"log"
 )
 
 type ValidMediaReader struct {
@@ -13,9 +13,10 @@ type ValidMediaReader struct {
 	buf               []byte
 	validated         bool
 	kind              string
+	pos               int
 	eof               bool
 	validateBufLength int
-	Hash              string
+	Hash              []byte
 }
 
 var (
@@ -28,10 +29,11 @@ func (v *ValidMediaReader) Read(p []byte) (int, error) {
 		return 0, ErrMustValidate
 	}
 
-	if len(v.buf) > 0 {
-		// todo check p capacity
-		n := copy(p, v.buf)
-		v.buf = nil
+	if v.pos < len(v.buf) {
+		size := min(len(v.buf)-v.pos, v.pos+cap(p))
+		n := copy(p, v.buf[v.pos:v.pos+size])
+		log.Printf("copying to buffer (cap=%d) %d:%d of %d", cap(p), v.pos, v.pos+size, len(v.buf))
+		v.pos += n
 		return n, nil
 	}
 
@@ -64,7 +66,7 @@ func (v *ValidMediaReader) Validate() error {
 		}
 	}
 
-	v.Hash = hex.EncodeToString(sha.Sum(nil))
+	v.Hash = sha.Sum(nil)
 	v.validated = true
 
 	for _, validator := range v.validators {
@@ -78,10 +80,6 @@ func (v *ValidMediaReader) Validate() error {
 
 func (v *ValidMediaReader) Close() error {
 	return v.reader.Close()
-}
-
-func (v *ValidMediaReader) Filename() string {
-	return v.Hash + "." + v.kind
 }
 
 func NewValidMediaReader(r io.ReadCloser, kind string, validateBufLength int) (*ValidMediaReader, error) {

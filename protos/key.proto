@@ -1,0 +1,17 @@
+edition = "2023";
+
+option go_package = "github.com/leedo/imgur-at-edge/protos/key";
+
+enum Extension {
+  jpg = 0;
+  png = 1;
+  gif = 3;
+  mov = 4;
+  mp4 = 5;
+}
+
+message Key {
+  uint64 hash = 1;
+  Extension extension = 2;
+  uint32 size = 3;
+}

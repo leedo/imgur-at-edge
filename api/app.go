@@ -1,16 +1,22 @@
 package api
 
 import (
+	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"imgur-at-edge/media"
+	pbkey "imgur-at-edge/protos/key"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/fastly/compute-sdk-go/cache/simple"
+	"github.com/fastly/compute-sdk-go/fsthttp"
 	"github.com/fastly/compute-sdk-go/kvstore"
 	"github.com/gorilla/mux"
 )
@@ -38,7 +44,8 @@ func (a *App) putHandler() func(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if err := a.checkContentLength(r.Header.Get("Content-Length")); err != nil {
+		length, err := a.checkContentLength(r.Header.Get("Content-Length"))
+		if err != nil {
 			badRequest(w, err.Error())
 			return
 		}
@@ -61,23 +68,44 @@ func (a *App) putHandler() func(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if _, err := a.KVStore.Lookup(v.Hash); err == nil {
-			io.Copy(io.Discard, v)
-			sendPutOK(w, r, v)
+		extt, ok := pbkey.Extension_value[ext]
+		if !ok {
+			internalError(w, "unable to find extension enum")
+			return
+		}
+		extenum := pbkey.Extension(extt)
+		hash := binary.BigEndian.Uint64(v.Hash)
+		key := pbkey.Key{
+			Hash:      &hash,
+			Extension: &extenum,
+			Size:      &length,
+		}
+
+		kenc, err := proto.Marshal(&key)
+		if err != nil {
+			internalError(w, "enable to encode key: "+err.Error())
 			return
 		}
 
-		if err := a.KVStore.Insert(v.Hash, v); err != nil {
+		khex := hex.EncodeToString(kenc)
+
+		if _, err := a.KVStore.Lookup(khex); err == nil {
+			io.Copy(io.Discard, v)
+			sendPutOK(w, r, khex, ext)
+			return
+		}
+
+		if err := a.KVStore.Insert(khex, v); err != nil {
 			internalError(w, "error inserting: "+err.Error())
 			return
 		}
 
-		sendPutOK(w, r, v)
+		sendPutOK(w, r, khex, ext)
 		return
 	}
 }
 
-func sendPutOK(w http.ResponseWriter, r *http.Request, v *media.ValidMediaReader) {
+func sendPutOK(w http.ResponseWriter, r *http.Request, key string, ext string) {
 	w.Header().Add("Content-Type", jsonType)
 
 	if origin := r.Header.Get("Origin"); origin != "" {
@@ -86,8 +114,69 @@ func sendPutOK(w http.ResponseWriter, r *http.Request, v *media.ValidMediaReader
 
 	w.WriteHeader(http.StatusOK)
 
-	const js = `{"status": "ok", "data": {"id": "%s", "link": "https://%s/%s"}}`
-	fmt.Fprintf(w, js, v.Hash, r.URL.Host, v.Filename())
+	const js = `{"status": "ok", "data": {"id": "%s", "link": "https://%s/v2/%s.%s"}}`
+	fmt.Fprintf(w, js, key, r.URL.Host, key, ext)
+}
+
+func (a *App) getHandlerV2() func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		vars := mux.Vars(r)
+		key := vars["key"]
+
+		w.Header().Set("X-Cache", "HIT")
+
+		res, err := simple.GetOrSet([]byte(key), func() (simple.CacheEntry, error) {
+			res, err := a.KVStore.Lookup(key)
+			if err != nil {
+				return simple.CacheEntry{}, err
+			}
+
+			w.Header().Set("X-Cache", "MISS")
+
+			return simple.CacheEntry{
+				Body: res,
+				TTL:  24 * time.Hour,
+			}, nil
+		})
+
+		w.Header().Set("X-Cache", "MISS")
+
+		if err != nil {
+			if err == kvstore.ErrKeyNotFound {
+				notFoundError(w)
+				return
+			}
+			internalError(w, err.Error())
+			return
+		}
+
+		keydec, err := hex.DecodeString(key)
+		if err != nil {
+			internalError(w, "unable to decode key: "+err.Error())
+			return
+		}
+		var k pbkey.Key
+		if err := proto.Unmarshal(keydec, &k); err != nil {
+			internalError(w, "unable to decode key: "+err.Error())
+			return
+		}
+
+		mime, ok := media.GetMimeType(k.Extension.String())
+		if !ok {
+			badRequest(w, "unknown extension "+k.Extension.String())
+			return
+		}
+
+		if fw := fsthttp.ResponseWriterFromContext(r.Context()); fw != nil {
+			fw.SetManualFramingMode(true)
+		}
+		w.Header().Add("Content-Type", mime)
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", k.GetSize()))
+		w.WriteHeader(http.StatusOK)
+		io.Copy(w, res)
+		return
+
+	}
 }
 
 func (a *App) getHandler() func(w http.ResponseWriter, r *http.Request) {
@@ -117,6 +206,8 @@ func (a *App) getHandler() func(w http.ResponseWriter, r *http.Request) {
 				TTL:  24 * time.Hour,
 			}, nil
 		})
+
+		w.Header().Set("X-Cache", "MISS")
 
 		if err != nil {
 			if err == kvstore.ErrKeyNotFound {
@@ -153,21 +244,21 @@ func (a *App) optionsHandler() func(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (a *App) checkContentLength(cLen string) error {
+func (a *App) checkContentLength(cLen string) (uint32, error) {
 	if cLen == "" {
-		return ErrMissingContentLength
+		return 0, ErrMissingContentLength
 	}
 
-	u, err := strconv.ParseUint(cLen, 10, 64)
+	u, err := strconv.ParseUint(cLen, 10, 32)
 	if err != nil {
-		return ErrInvalidContentLength
+		return 0, ErrInvalidContentLength
 	}
 
 	if u > a.MaxLength {
-		return ErrContentLengthTooLarge
+		return 0, ErrContentLengthTooLarge
 	}
 
-	return nil
+	return uint32(u), nil
 }
 
 func (a *App) Router() *mux.Router {
@@ -180,6 +271,10 @@ func (a *App) Router() *mux.Router {
 	r.Path(`/{hash:[a-zA-Z0-9]{32,40}}.{ext:(?:` + strings.Join(media.GetExtensions(), "|") + `)}`).
 		Methods("GET").
 		HandlerFunc(a.getHandler())
+
+	r.Path(`/v2/{key:[a-zA-Z0-9]{32,40}}.{ext:(?:` + strings.Join(media.GetExtensions(), "|") + `)}`).
+		Methods("GET").
+		HandlerFunc(a.getHandlerV2())
 
 	r.Path("/").
 		Methods("OPTIONS").
