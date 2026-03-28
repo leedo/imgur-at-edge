@@ -21,7 +21,11 @@ import (
 	"github.com/gorilla/mux"
 )
 
-const jsonType = "application/json"
+const (
+	jsonType  = "application/json"
+	cacheHit  = "HIT"
+	cacheMiss = "MISS"
+)
 
 var (
 	ErrMissingContentLength  = errors.New("missing content-length")
@@ -68,39 +72,23 @@ func (a *App) putHandler() func(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		extt, ok := pbkey.Extension_value[ext]
-		if !ok {
-			internalError(w, "unable to find extension enum")
-			return
-		}
-		extenum := pbkey.Extension(extt)
-		hash := binary.BigEndian.Uint64(v.Hash)
-		key := pbkey.Key{
-			Hash:      &hash,
-			Extension: &extenum,
-			Size:      &length,
-		}
-
-		kenc, err := proto.Marshal(&key)
+		key, err := encodeKey(v.Hash, ext, length)
 		if err != nil {
-			internalError(w, "enable to encode key: "+err.Error())
-			return
+			internalError(w, err.Error())
 		}
 
-		khex := hex.EncodeToString(kenc)
-
-		if _, err := a.KVStore.Lookup(khex); err == nil {
+		if _, err := a.KVStore.Lookup(key); err == nil {
 			io.Copy(io.Discard, v)
-			sendPutOK(w, r, khex, ext)
+			sendPutOK(w, r, key, ext)
 			return
 		}
 
-		if err := a.KVStore.Insert(khex, v); err != nil {
+		if err := a.KVStore.Insert(key, v); err != nil {
 			internalError(w, "error inserting: "+err.Error())
 			return
 		}
 
-		sendPutOK(w, r, khex, ext)
+		sendPutOK(w, r, key, ext)
 		return
 	}
 }
@@ -124,42 +112,18 @@ func (a *App) getHandlerV2() func(w http.ResponseWriter, r *http.Request) {
 		key := vars["key"]
 		ext := vars["ext"]
 
-		keydec, err := hex.DecodeString(key)
+		k, err := decodeKey(key)
 		if err != nil {
 			internalError(w, "unable to decode key: "+err.Error())
 			return
 		}
-		var k pbkey.Key
-		if err := proto.Unmarshal(keydec, &k); err != nil {
-			internalError(w, "unable to decode key: "+err.Error())
+
+		if checkIfNoneMatch(r.Header.Get("If-None-Match"), k.Hash) {
+			w.WriteHeader(http.StatusNotModified)
 			return
 		}
 
-		inm := r.Header.Get("If-None-Match")
-		if inm != "" && k.Hash != nil {
-			i, err := strconv.ParseUint(inm, 16, 64)
-			if err == nil && i == *k.Hash {
-				w.WriteHeader(http.StatusNotModified)
-				return
-			}
-		}
-
-		w.Header().Set("X-Cache", "HIT")
-
-		res, err := simple.GetOrSet([]byte(key), func() (simple.CacheEntry, error) {
-			res, err := a.KVStore.Lookup(key)
-			if err != nil {
-				return simple.CacheEntry{}, err
-			}
-
-			w.Header().Set("X-Cache", "MISS")
-
-			return simple.CacheEntry{
-				Body: res,
-				TTL:  24 * time.Hour,
-			}, nil
-		})
-
+		res, hit, err := a.getOrSet(key)
 		if err != nil {
 			if err == kvstore.ErrKeyNotFound {
 				notFoundError(w)
@@ -174,6 +138,7 @@ func (a *App) getHandlerV2() func(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, fmt.Sprintf("URL extension (%s) does not match content (%s)", ext, pbext))
 			return
 		}
+
 		mime, ok := media.GetMimeType(pbext)
 		if !ok {
 			badRequest(w, "unknown extension "+k.Extension.String())
@@ -184,8 +149,9 @@ func (a *App) getHandlerV2() func(w http.ResponseWriter, r *http.Request) {
 			fw.SetManualFramingMode(true)
 		}
 
+		w.Header().Set("X-Cache", hit)
 		w.Header().Add("Content-Type", mime)
-		w.Header().Set("Content-Length", fmt.Sprintf("%d", k.GetSize()))
+		w.Header().Set("Content-Length", strconv.Itoa(int(k.GetSize())))
 		w.Header().Set("Etag", strconv.FormatUint(*k.Hash, 16))
 		w.WriteHeader(http.StatusOK)
 		io.Copy(w, res)
@@ -206,24 +172,7 @@ func (a *App) getHandler() func(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		w.Header().Set("X-Cache", "HIT")
-
-		res, err := simple.GetOrSet([]byte(hash), func() (simple.CacheEntry, error) {
-			res, err := a.KVStore.Lookup(string(hash))
-			if err != nil {
-				return simple.CacheEntry{}, err
-			}
-
-			w.Header().Set("X-Cache", "MISS")
-
-			return simple.CacheEntry{
-				Body: res,
-				TTL:  24 * time.Hour,
-			}, nil
-		})
-
-		w.Header().Set("X-Cache", "MISS")
-
+		res, hit, err := a.getOrSet(hash)
 		if err != nil {
 			if err == kvstore.ErrKeyNotFound {
 				notFoundError(w)
@@ -233,6 +182,7 @@ func (a *App) getHandler() func(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		w.Header().Set("X-Cache", hit)
 		w.Header().Add("Content-Type", mime)
 		w.WriteHeader(http.StatusOK)
 		io.Copy(w, res)
@@ -274,6 +224,74 @@ func (a *App) checkContentLength(cLen string) (uint32, error) {
 	}
 
 	return uint32(u), nil
+}
+
+func (a *App) getOrSet(key string) (io.Reader, string, error) {
+	hit := cacheHit
+	res, err := simple.GetOrSet([]byte(key), func() (simple.CacheEntry, error) {
+		res, err := a.KVStore.Lookup(key)
+		if err != nil {
+			return simple.CacheEntry{}, err
+		}
+
+		hit = cacheMiss
+
+		return simple.CacheEntry{
+			Body: res,
+			TTL:  24 * time.Hour,
+		}, nil
+	})
+
+	return res, hit, err
+}
+
+func decodeKey(key string) (*pbkey.Key, error) {
+	keydec, err := hex.DecodeString(key)
+	if err != nil {
+		return nil, err
+	}
+
+	var k pbkey.Key
+	if err := proto.Unmarshal(keydec, &k); err != nil {
+		return nil, err
+	}
+
+	return &k, nil
+}
+
+func encodeKey(hash []byte, ext string, length uint32) (string, error) {
+	extt, ok := pbkey.Extension_value[ext]
+	if !ok {
+		return "", errors.New("unknown extension")
+	}
+
+	extenum := pbkey.Extension(extt)
+	i := binary.BigEndian.Uint64(hash)
+	key := pbkey.Key{
+		Hash:      &i,
+		Extension: &extenum,
+		Size:      &length,
+	}
+
+	kenc, err := proto.Marshal(&key)
+	if err != nil {
+		return "", err
+	}
+
+	return hex.EncodeToString(kenc), nil
+}
+
+func checkIfNoneMatch(inm string, hash *uint64) bool {
+	if inm == "" || hash == nil {
+		return false
+	}
+
+	i, err := strconv.ParseUint(inm, 16, 64)
+	if err != nil {
+		return false
+	}
+
+	return i == *hash
 }
 
 func (a *App) Router() *mux.Router {
