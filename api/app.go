@@ -160,8 +160,6 @@ func (a *App) getHandlerV2() func(w http.ResponseWriter, r *http.Request) {
 			}, nil
 		})
 
-		w.Header().Set("X-Cache", "MISS")
-
 		if err != nil {
 			if err == kvstore.ErrKeyNotFound {
 				notFoundError(w)
