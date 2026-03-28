@@ -4,7 +4,6 @@ import (
 	"crypto/sha1"
 	"errors"
 	"io"
-	"log"
 )
 
 type ValidMediaReader struct {
@@ -32,7 +31,6 @@ func (v *ValidMediaReader) Read(p []byte) (int, error) {
 	if v.pos < len(v.buf) {
 		size := min(len(v.buf)-v.pos, v.pos+cap(p))
 		n := copy(p, v.buf[v.pos:v.pos+size])
-		log.Printf("copying to buffer (cap=%d) %d:%d of %d", cap(p), v.pos, v.pos+size, len(v.buf))
 		v.pos += n
 		return n, nil
 	}
