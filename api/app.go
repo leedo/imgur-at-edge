@@ -147,7 +147,7 @@ func (a *App) getHandlerV2() func(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (a *App) getHandler() func(w http.ResponseWriter, r *http.Request) {
+func (a *App) getHandlerV1() func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		hash := vars["hash"]
@@ -241,9 +241,9 @@ func (a *App) Router() *mux.Router {
 
 	r.Path(`/{hash:[a-zA-Z0-9]{32,40}}.{ext:(?:` + strings.Join(media.GetExtensions(), "|") + `)}`).
 		Methods("GET").
-		HandlerFunc(a.getHandler())
+		HandlerFunc(a.getHandlerV1())
 
-	r.Path(`/v2/{key:[a-zA-Z0-9]{32,40}}.{ext:(?:` + strings.Join(media.GetExtensions(), "|") + `)}`).
+	r.Path(`/v2/{key:[a-zA-Z0-9]+}.{ext:(?:` + strings.Join(media.GetExtensions(), "|") + `)}`).
 		Methods("GET").
 		HandlerFunc(a.getHandlerV2())
 
