@@ -111,16 +111,6 @@ func (a *App) getHandlerV2() func(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		res, hit, err := a.getOrSet(key)
-		if err != nil {
-			if err == kvstore.ErrKeyNotFound {
-				notFoundError(w)
-				return
-			}
-			internalError(w, err.Error())
-			return
-		}
-
 		pbext := k.Extension.String()
 		if pbext != ext {
 			badRequest(w, fmt.Sprintf("URL extension (%s) does not match content (%s)", ext, pbext))
@@ -130,6 +120,16 @@ func (a *App) getHandlerV2() func(w http.ResponseWriter, r *http.Request) {
 		mime, ok := media.GetMimeType(pbext)
 		if !ok {
 			badRequest(w, "unknown extension "+k.Extension.String())
+			return
+		}
+
+		res, hit, err := a.getOrSet(key)
+		if err != nil {
+			if err == kvstore.ErrKeyNotFound {
+				notFoundError(w)
+				return
+			}
+			internalError(w, err.Error())
 			return
 		}
 
