@@ -232,23 +232,6 @@ func (a *App) getOrSet(key string) (io.Reader, string, error) {
 	return res, hit, err
 }
 
-func checkIfNoneMatch(inm string, hash *uint64) bool {
-	if inm == "" || hash == nil {
-		return false
-	}
-
-	if inm[0:1] != "\"" || inm[len(inm)-1:] != "\"" {
-		return false
-	}
-
-	i, err := strconv.ParseUint(inm[1:len(inm)-1], 16, 64)
-	if err != nil {
-		return false
-	}
-
-	return i == *hash
-}
-
 func (a *App) Router() *mux.Router {
 	r := mux.NewRouter()
 

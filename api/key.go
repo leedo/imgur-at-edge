@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	pbkey "imgur-at-edge/protos/key"
+	"strconv"
 
 	"google.golang.org/protobuf/proto"
 )
@@ -43,4 +44,21 @@ func encodeKey(hash []byte, ext string, length uint32) (string, error) {
 	}
 
 	return hex.EncodeToString(kenc), nil
+}
+
+func checkIfNoneMatch(inm string, hash *uint64) bool {
+	if inm == "" || hash == nil {
+		return false
+	}
+
+	if inm[0:1] != "\"" || inm[len(inm)-1:] != "\"" {
+		return false
+	}
+
+	i, err := strconv.ParseUint(inm[1:len(inm)-1], 16, 64)
+	if err != nil {
+		return false
+	}
+
+	return i == *hash
 }
