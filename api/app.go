@@ -22,13 +22,6 @@ const (
 	cacheMiss = "MISS"
 )
 
-var (
-	ErrMissingContentLength  = errors.New("missing content-length")
-	ErrInvalidContentLength  = errors.New("invalid content-length")
-	ErrContentLengthTooLarge = errors.New("content-length too large")
-	ErrUnknownContentType    = errors.New("unknown content-type")
-)
-
 type App struct {
 	MaxLength         uint64
 	ValidateBufLength int
@@ -151,7 +144,6 @@ func (a *App) getHandlerV2() func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		io.Copy(w, res)
 		return
-
 	}
 }
 

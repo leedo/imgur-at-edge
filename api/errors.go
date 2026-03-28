@@ -2,8 +2,16 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
+)
+
+var (
+	ErrMissingContentLength  = errors.New("missing content-length")
+	ErrInvalidContentLength  = errors.New("invalid content-length")
+	ErrContentLengthTooLarge = errors.New("content-length too large")
+	ErrUnknownContentType    = errors.New("unknown content-type")
 )
 
 func badRequest(w http.ResponseWriter, msg string) {
