@@ -237,7 +237,7 @@ func checkIfNoneMatch(inm string, hash *uint64) bool {
 		return false
 	}
 
-	if string(inm[0]) != "\"" || string(inm[len(inm)-1:]) != `"` {
+	if inm[0:1] != "\"" || inm[len(inm)-1:] != "\"" {
 		return false
 	}
 
