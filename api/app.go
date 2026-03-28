@@ -122,6 +122,27 @@ func (a *App) getHandlerV2() func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		key := vars["key"]
+		ext := vars["ext"]
+
+		keydec, err := hex.DecodeString(key)
+		if err != nil {
+			internalError(w, "unable to decode key: "+err.Error())
+			return
+		}
+		var k pbkey.Key
+		if err := proto.Unmarshal(keydec, &k); err != nil {
+			internalError(w, "unable to decode key: "+err.Error())
+			return
+		}
+
+		inm := r.Header.Get("If-None-Match")
+		if inm != "" && k.Hash != nil {
+			i, err := strconv.ParseUint(inm, 16, 64)
+			if err == nil && i == *k.Hash {
+				w.WriteHeader(http.StatusNotModified)
+				return
+			}
+		}
 
 		w.Header().Set("X-Cache", "HIT")
 
@@ -150,18 +171,12 @@ func (a *App) getHandlerV2() func(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		keydec, err := hex.DecodeString(key)
-		if err != nil {
-			internalError(w, "unable to decode key: "+err.Error())
+		pbext := k.Extension.String()
+		if pbext != ext {
+			badRequest(w, fmt.Sprintf("URL extension (%s) does not match content (%s)", ext, pbext))
 			return
 		}
-		var k pbkey.Key
-		if err := proto.Unmarshal(keydec, &k); err != nil {
-			internalError(w, "unable to decode key: "+err.Error())
-			return
-		}
-
-		mime, ok := media.GetMimeType(k.Extension.String())
+		mime, ok := media.GetMimeType(pbext)
 		if !ok {
 			badRequest(w, "unknown extension "+k.Extension.String())
 			return
@@ -170,8 +185,10 @@ func (a *App) getHandlerV2() func(w http.ResponseWriter, r *http.Request) {
 		if fw := fsthttp.ResponseWriterFromContext(r.Context()); fw != nil {
 			fw.SetManualFramingMode(true)
 		}
+
 		w.Header().Add("Content-Type", mime)
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", k.GetSize()))
+		w.Header().Set("Etag", strconv.FormatUint(*k.Hash, 16))
 		w.WriteHeader(http.StatusOK)
 		io.Copy(w, res)
 		return
