@@ -1,19 +1,14 @@
 package api
 
 import (
-	"encoding/binary"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"imgur-at-edge/media"
-	pbkey "imgur-at-edge/protos/key"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
-
-	"google.golang.org/protobuf/proto"
 
 	"github.com/fastly/compute-sdk-go/cache/simple"
 	"github.com/fastly/compute-sdk-go/fsthttp"
@@ -152,7 +147,7 @@ func (a *App) getHandlerV2() func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Cache", hit)
 		w.Header().Add("Content-Type", mime)
 		w.Header().Set("Content-Length", strconv.Itoa(int(k.GetSize())))
-		w.Header().Set("Etag", strconv.FormatUint(*k.Hash, 16))
+		w.Header().Set("Etag", `"`+strconv.FormatUint(*k.Hash, 16)+`"`)
 		w.WriteHeader(http.StatusOK)
 		io.Copy(w, res)
 		return
@@ -245,48 +240,16 @@ func (a *App) getOrSet(key string) (io.Reader, string, error) {
 	return res, hit, err
 }
 
-func decodeKey(key string) (*pbkey.Key, error) {
-	keydec, err := hex.DecodeString(key)
-	if err != nil {
-		return nil, err
-	}
-
-	var k pbkey.Key
-	if err := proto.Unmarshal(keydec, &k); err != nil {
-		return nil, err
-	}
-
-	return &k, nil
-}
-
-func encodeKey(hash []byte, ext string, length uint32) (string, error) {
-	extt, ok := pbkey.Extension_value[ext]
-	if !ok {
-		return "", errors.New("unknown extension")
-	}
-
-	extenum := pbkey.Extension(extt)
-	i := binary.BigEndian.Uint64(hash)
-	key := pbkey.Key{
-		Hash:      &i,
-		Extension: &extenum,
-		Size:      &length,
-	}
-
-	kenc, err := proto.Marshal(&key)
-	if err != nil {
-		return "", err
-	}
-
-	return hex.EncodeToString(kenc), nil
-}
-
 func checkIfNoneMatch(inm string, hash *uint64) bool {
 	if inm == "" || hash == nil {
 		return false
 	}
 
-	i, err := strconv.ParseUint(inm, 16, 64)
+	if string(inm[0]) != "\"" || string(inm[len(inm)-1:]) != `"` {
+		return false
+	}
+
+	i, err := strconv.ParseUint(inm[1:len(inm)-1], 16, 64)
 	if err != nil {
 		return false
 	}
