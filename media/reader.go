@@ -29,8 +29,8 @@ func (v *ValidMediaReader) Read(p []byte) (int, error) {
 	}
 
 	if v.pos < len(v.buf) {
-		size := min(len(v.buf)-v.pos, v.pos+cap(p))
-		n := copy(p, v.buf[v.pos:v.pos+size])
+		end := min(len(v.buf), v.pos+cap(p))
+		n := copy(p, v.buf[v.pos:end])
 		v.pos += n
 		return n, nil
 	}

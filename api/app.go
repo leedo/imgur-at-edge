@@ -234,16 +234,17 @@ func (a *App) getOrSet(key string) (io.Reader, string, error) {
 
 func (a *App) Router() *mux.Router {
 	r := mux.NewRouter()
+	exts := media.GetExtensions()
 
 	r.Path("/").
 		Methods("PUT").
 		HandlerFunc(a.putHandler())
 
-	r.Path(`/{hash:[a-zA-Z0-9]{32,40}}.{ext:(?:` + strings.Join(media.GetExtensions(), "|") + `)}`).
+	r.Path(`/{hash:[a-zA-Z0-9]{32,40}}.{ext:(?:` + strings.Join(exts, "|") + `)}`).
 		Methods("GET").
 		HandlerFunc(a.getHandlerV1())
 
-	r.Path(`/v2/{key:[a-zA-Z0-9]+}.{ext:(?:` + strings.Join(media.GetExtensions(), "|") + `)}`).
+	r.Path(`/v2/{key:[a-zA-Z0-9]+}.{ext:(?:` + strings.Join(exts, "|") + `)}`).
 		Methods("GET").
 		HandlerFunc(a.getHandlerV2())
 
