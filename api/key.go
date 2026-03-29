@@ -47,7 +47,7 @@ func encodeKey(hash []byte, ext string, length uint32) (string, error) {
 }
 
 func checkIfNoneMatch(inm string, hash *uint64) bool {
-	if inm == "" || hash == nil {
+	if inm == "" || hash == nil || len(inm) < 3 {
 		return false
 	}
 
