@@ -26,6 +26,7 @@ type App struct {
 	MaxLength         uint64
 	ValidateBufLength int
 	KVStore           *kvstore.Store
+	TTL               time.Duration
 }
 
 func (a *App) putHandler() func(w http.ResponseWriter, r *http.Request) {
@@ -225,7 +226,7 @@ func (a *App) getOrSet(key string) (io.Reader, string, error) {
 
 		return simple.CacheEntry{
 			Body: res,
-			TTL:  24 * time.Hour,
+			TTL:  a.TTL,
 		}, nil
 	})
 

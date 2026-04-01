@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"imgur-at-edge/api"
 	"os"
+	"time"
 
 	"github.com/fastly/compute-sdk-go/fsthttp"
 	"github.com/fastly/compute-sdk-go/kvstore"
@@ -23,6 +24,7 @@ func main() {
 		MaxLength:         1024 * 1024 * 25,
 		ValidateBufLength: 1024 * 10,
 		KVStore:           s,
+		TTL:               24 * time.Hour,
 	}
 
 	fsthttp.Serve(fsthttp.Adapt(app.Router()))
