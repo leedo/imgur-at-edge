@@ -29,11 +29,15 @@ type App struct {
 	TTL               time.Duration
 }
 
-type trace []*span
 type span struct {
 	name     string
 	start    time.Time
 	duration int64
+	childs   []*span
+}
+
+func NewTrace(name string) span {
+	return span{name: name, start: time.Now()}
 }
 
 func (s *span) End() {
@@ -41,21 +45,20 @@ func (s *span) End() {
 }
 
 func (s span) String() string {
-	return s.name + "=" + strconv.FormatInt(s.duration, 10)
-}
-
-func (t trace) String() string {
-	var out []string
-	for _, s := range t {
-		out = append(out, s.String())
+	if s.duration == 0 {
+		s.End()
 	}
-	return strings.Join(out, ",")
+	var out []string
+	for _, c := range s.childs {
+		out = append(out, c.String())
+	}
+	return "[" + s.name + "=" + strconv.FormatInt(s.duration, 10) + strings.Join(out, "") + "]"
 }
 
-func (t *trace) AddSpan(name string) *span {
-	s := &span{name: name, start: time.Now()}
-	*t = append(*t, s)
-	return s
+func (s *span) AddSpan(name string) *span {
+	c := &span{name: name, start: time.Now()}
+	s.childs = append(s.childs, c)
+	return c
 }
 
 func (a *App) putHandler() func(w http.ResponseWriter, r *http.Request) {
@@ -126,7 +129,7 @@ func sendPutOK(w http.ResponseWriter, r *http.Request, key string, ext string) {
 
 func (a *App) getHandlerV2() func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
-		t := &trace{}
+		t := NewTrace("v2")
 		vars := mux.Vars(r)
 		key := vars["key"]
 		ext := vars["ext"]
@@ -158,7 +161,7 @@ func (a *App) getHandlerV2() func(w http.ResponseWriter, r *http.Request) {
 		}
 		s.End()
 
-		res, hit, err := a.getOrSet(key, t)
+		res, hit, err := a.getOrSet(key, &t)
 		if err != nil {
 			if err == kvstore.ErrKeyNotFound {
 				notFoundError(w)
@@ -195,7 +198,7 @@ func (a *App) getHandlerV1() func(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		res, hit, err := a.getOrSet(hash, &trace{})
+		res, hit, err := a.getOrSet(hash, &span{})
 		if err != nil {
 			if err == kvstore.ErrKeyNotFound {
 				notFoundError(w)
@@ -249,19 +252,20 @@ func (a *App) checkContentLength(cLen string) (uint32, error) {
 	return uint32(u), nil
 }
 
-func (a *App) getOrSet(key string, t *trace) (io.Reader, string, error) {
-	hit := cacheHit
-
+func (a *App) getOrSet(key string, t *span) (io.Reader, string, error) {
 	s := t.AddSpan("simple-cache")
 	defer s.End()
 
+	hit := cacheHit
+
 	res, err := simple.GetOrSet([]byte(key), func() (simple.CacheEntry, error) {
-		s := t.AddSpan("kv-lookup")
+		s := s.AddSpan("kv-lookup")
+		defer s.End()
+
 		res, err := a.KVStore.Lookup(key)
 		if err != nil {
 			return simple.CacheEntry{}, err
 		}
-		s.End()
 
 		hit = cacheMiss
 
