@@ -29,6 +29,35 @@ type App struct {
 	TTL               time.Duration
 }
 
+type trace []*span
+type span struct {
+	name     string
+	start    time.Time
+	duration int64
+}
+
+func (s *span) End() {
+	s.duration = time.Since(s.start).Microseconds()
+}
+
+func (s span) String() string {
+	return s.name + "=" + strconv.FormatInt(s.duration, 10)
+}
+
+func (t trace) String() string {
+	var out []string
+	for _, s := range t {
+		out = append(out, s.String())
+	}
+	return strings.Join(out, ",")
+}
+
+func (t *trace) AddSpan(name string) *span {
+	s := &span{name: name, start: time.Now()}
+	*t = append(*t, s)
+	return s
+}
+
 func (a *App) putHandler() func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ext, ok := media.GetExtension(r.Header.Get("Content-Type"))
@@ -97,16 +126,20 @@ func sendPutOK(w http.ResponseWriter, r *http.Request, key string, ext string) {
 
 func (a *App) getHandlerV2() func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
+		t := &trace{}
 		vars := mux.Vars(r)
 		key := vars["key"]
 		ext := vars["ext"]
 
+		s := t.AddSpan("decode-key")
 		k, err := decodeKey(key)
 		if err != nil {
 			internalError(w, "unable to decode key: "+err.Error())
 			return
 		}
+		s.End()
 
+		s = t.AddSpan("check-headers")
 		if checkIfNoneMatch(r.Header.Get("If-None-Match"), k.Hash) {
 			w.WriteHeader(http.StatusNotModified)
 			return
@@ -123,8 +156,9 @@ func (a *App) getHandlerV2() func(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, "unknown extension "+k.Extension.String())
 			return
 		}
+		s.End()
 
-		res, hit, err := a.getOrSet(key)
+		res, hit, err := a.getOrSet(key, t)
 		if err != nil {
 			if err == kvstore.ErrKeyNotFound {
 				notFoundError(w)
@@ -142,6 +176,7 @@ func (a *App) getHandlerV2() func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Add("Content-Type", mime)
 		w.Header().Set("Content-Length", strconv.Itoa(int(k.GetSize())))
 		w.Header().Set("Etag", `"`+strconv.FormatUint(*k.Hash, 16)+`"`)
+		w.Header().Set("Trace", t.String())
 		w.WriteHeader(http.StatusOK)
 		io.Copy(w, res)
 		return
@@ -160,7 +195,7 @@ func (a *App) getHandlerV1() func(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		res, hit, err := a.getOrSet(hash)
+		res, hit, err := a.getOrSet(hash, &trace{})
 		if err != nil {
 			if err == kvstore.ErrKeyNotFound {
 				notFoundError(w)
@@ -214,13 +249,19 @@ func (a *App) checkContentLength(cLen string) (uint32, error) {
 	return uint32(u), nil
 }
 
-func (a *App) getOrSet(key string) (io.Reader, string, error) {
+func (a *App) getOrSet(key string, t *trace) (io.Reader, string, error) {
 	hit := cacheHit
+
+	s := t.AddSpan("simple-cache")
+	defer s.End()
+
 	res, err := simple.GetOrSet([]byte(key), func() (simple.CacheEntry, error) {
+		s := t.AddSpan("kv-lookup")
 		res, err := a.KVStore.Lookup(key)
 		if err != nil {
 			return simple.CacheEntry{}, err
 		}
+		s.End()
 
 		hit = cacheMiss
 
