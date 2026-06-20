@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"imgur-at-edge/media"
@@ -20,6 +21,7 @@ const (
 	jsonType  = "application/json"
 	cacheHit  = "HIT"
 	cacheMiss = "MISS"
+	traceKey  = "trace"
 )
 
 type App struct {
@@ -36,8 +38,8 @@ type span struct {
 	childs   []*span
 }
 
-func NewTrace(name string) span {
-	return span{name: name, start: time.Now()}
+func NewTrace(name string) *span {
+	return &span{name: name, start: time.Now()}
 }
 
 func (s *span) End() {
@@ -50,9 +52,9 @@ func (s span) String() string {
 	}
 	var out []string
 	for _, c := range s.childs {
-		out = append(out, c.String())
+		out = append(out, " ["+c.String()+"]")
 	}
-	return "[" + s.name + "=" + strconv.FormatInt(s.duration, 10) + strings.Join(out, "") + "]"
+	return s.name + "=" + strconv.FormatInt(s.duration, 10) + "μs" + strings.Join(out, "")
 }
 
 func (s *span) AddSpan(name string) *span {
@@ -127,9 +129,16 @@ func sendPutOK(w http.ResponseWriter, r *http.Request, key string, ext string) {
 	fmt.Fprintf(w, js, key, r.URL.Host, key, ext)
 }
 
+func requestTrace(r *http.Request) *span {
+	if t := r.Context().Value(traceKey); t != nil {
+		return t.(*span)
+	}
+	return NewTrace("unknown")
+}
+
 func (a *App) getHandlerV2() func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
-		t := NewTrace("v2")
+		t := requestTrace(r)
 		vars := mux.Vars(r)
 		key := vars["key"]
 		ext := vars["ext"]
@@ -161,7 +170,7 @@ func (a *App) getHandlerV2() func(w http.ResponseWriter, r *http.Request) {
 		}
 		s.End()
 
-		res, hit, err := a.getOrSet(key, &t)
+		res, hit, err := a.getOrSet(key, t)
 		if err != nil {
 			if err == kvstore.ErrKeyNotFound {
 				notFoundError(w)
@@ -278,29 +287,47 @@ func (a *App) getOrSet(key string, t *span) (io.Reader, string, error) {
 	return res, hit, err
 }
 
+func traceMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		routeName := "unknown"
+		if route := mux.CurrentRoute(r); route != nil {
+			routeName = route.GetName()
+		}
+
+		ctx := context.WithValue(r.Context(), traceKey, NewTrace(routeName))
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
 func (a *App) Router() *mux.Router {
 	r := mux.NewRouter()
 	exts := media.GetExtensions()
 
 	r.Path("/").
 		Methods("PUT").
-		HandlerFunc(a.putHandler())
+		HandlerFunc(a.putHandler()).
+		Name("put")
 
 	r.Path(`/{hash:[a-zA-Z0-9]{32,40}}.{ext:(?:` + strings.Join(exts, "|") + `)}`).
 		Methods("GET").
-		HandlerFunc(a.getHandlerV1())
+		HandlerFunc(a.getHandlerV1()).
+		Name("get_v1")
 
 	r.Path(`/v2/{key:[a-zA-Z0-9]+}.{ext:(?:` + strings.Join(exts, "|") + `)}`).
 		Methods("GET").
-		HandlerFunc(a.getHandlerV2())
+		HandlerFunc(a.getHandlerV2()).
+		Name("get_v2")
 
 	r.Path("/").
 		Methods("OPTIONS").
-		HandlerFunc(a.optionsHandler())
+		HandlerFunc(a.optionsHandler()).
+		Name("options")
 
 	r.NotFoundHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		notFoundError(w)
 	})
+
+	r.Use(traceMiddleware)
 
 	return r
 }
