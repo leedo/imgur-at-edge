@@ -35,7 +35,7 @@ func (s span) String() string {
 	for _, c := range s.childs {
 		out = append(out, " ["+c.String()+"]")
 	}
-	return s.name + "=" + strconv.FormatInt(s.duration, 10) + "us" + strings.Join(out, "")
+	return s.name + "=" + strconv.FormatInt(s.duration, 10) + "\xb5s" + strings.Join(out, "")
 }
 
 func (s *span) AddSpan(name string) *span {
