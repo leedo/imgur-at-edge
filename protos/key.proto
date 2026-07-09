@@ -8,6 +8,7 @@ enum Extension {
   gif = 3;
   mov = 4;
   mp4 = 5;
+  m4v = 6;
 }
 
 message Key {

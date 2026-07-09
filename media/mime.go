@@ -7,6 +7,7 @@ var types = map[string]string{
 	"image/png":       "png",
 	"video/quicktime": "mov",
 	"video/mp4":       "mp4",
+	"video/x-m4v":     "m4v",
 }
 
 var mimes = map[string]string{
@@ -15,6 +16,7 @@ var mimes = map[string]string{
 	"png": "image/png",
 	"mov": "video/quicktime",
 	"mp4": "video/mp4",
+	"m4v": "video/x-m4v",
 }
 
 func GetExtension(mime string) (string, bool) {
@@ -54,6 +56,9 @@ var magic = map[string][]validator{
 	"mov": {
 		{[]byte{0x66, 0x74, 0x79, 0x70, 0x71, 0x74, 0x20, 0x20}, 4},
 	},
+	"m4v": {
+		{[]byte{0x66, 0x74, 0x79, 0x70, 0x4D, 0x34, 0x56, 0x20}, 4},
+	},
 }
 
-var exts = []string{"png", "gif", "jpg", "mp4", "mov"}
+var exts = []string{"png", "gif", "jpg", "mp4", "mov", "m4v"}
