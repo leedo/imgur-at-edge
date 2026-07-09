@@ -91,7 +91,7 @@ func sendPutOK(w http.ResponseWriter, r *http.Request, key string, ext string) {
 
 	w.WriteHeader(http.StatusOK)
 
-	const js = `{"status": "ok", "data": {"id": "%s", "link": "https://%s/v2/%s.%s"}}`
+	const js = `{"status": "ok", "data": {"id": "%s", "link": "https://%s/img/v2/%s.%s"}}`
 	fmt.Fprintf(w, js, key, r.URL.Host, key, ext)
 }
 
@@ -250,22 +250,22 @@ func (a *App) Router() *mux.Router {
 	r := mux.NewRouter()
 	exts := media.GetExtensions()
 
-	r.Path("/").
+	r.Path("/{prefix:(?:img/)?}").
 		Methods("PUT").
 		HandlerFunc(a.putHandler()).
 		Name("put")
 
-	r.Path(`/{hash:[a-zA-Z0-9]{32,40}}.{ext:(?:` + strings.Join(exts, "|") + `)}`).
+	r.Path(`/{prefix:(?:img/)?}{hash:[a-zA-Z0-9]{32,40}}.{ext:(?:` + strings.Join(exts, "|") + `)}`).
 		Methods("GET").
 		HandlerFunc(a.getHandlerV1()).
 		Name("get_v1")
 
-	r.Path(`/v2/{key:[a-zA-Z0-9]+}.{ext:(?:` + strings.Join(exts, "|") + `)}`).
+	r.Path(`/{prefix:(?:img/)?}v2/{key:[a-zA-Z0-9]+}.{ext:(?:` + strings.Join(exts, "|") + `)}`).
 		Methods("GET").
 		HandlerFunc(a.getHandlerV2()).
 		Name("get_v2")
 
-	r.Path("/").
+	r.Path("/{prefix:(?:img/)?}").
 		Methods("OPTIONS").
 		HandlerFunc(a.optionsHandler()).
 		Name("options")
