@@ -4,7 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
-	"net/http"
+
+	"github.com/fastly/compute-sdk-go/fsthttp"
 )
 
 var (
@@ -14,20 +15,20 @@ var (
 	ErrUnknownContentType    = errors.New("unknown content-type")
 )
 
-func badRequest(w http.ResponseWriter, msg string) {
-	jsonError(w, http.StatusBadRequest, msg)
+func badRequest(w fsthttp.ResponseWriter, msg string) {
+	jsonError(w, fsthttp.StatusBadRequest, msg)
 }
 
-func internalError(w http.ResponseWriter, msg string) {
+func internalError(w fsthttp.ResponseWriter, msg string) {
 	log.Println(msg)
-	jsonError(w, http.StatusInternalServerError, "internal error")
+	jsonError(w, fsthttp.StatusInternalServerError, "internal error")
 }
 
-func notFoundError(w http.ResponseWriter) {
-	jsonError(w, http.StatusNotFound, "not found")
+func notFoundError(w fsthttp.ResponseWriter) {
+	jsonError(w, fsthttp.StatusNotFound, "not found")
 }
 
-func jsonError(w http.ResponseWriter, status int, msg string) {
+func jsonError(w fsthttp.ResponseWriter, status int, msg string) {
 	type jsError struct {
 		Err string `json:"error"`
 	}

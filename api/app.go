@@ -1,11 +1,11 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"imgur-at-edge/media"
 	"io"
-	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -13,7 +13,6 @@ import (
 	"github.com/fastly/compute-sdk-go/cache/simple"
 	"github.com/fastly/compute-sdk-go/fsthttp"
 	"github.com/fastly/compute-sdk-go/kvstore"
-	"github.com/gorilla/mux"
 )
 
 const (
@@ -29,178 +28,178 @@ type App struct {
 	TTL               time.Duration
 }
 
-func (a *App) putHandler() func(w http.ResponseWriter, r *http.Request) {
-	return func(w http.ResponseWriter, r *http.Request) {
-		ext, ok := media.GetExtension(r.Header.Get("Content-Type"))
-		if !ok {
-			badRequest(w, ErrUnknownContentType.Error())
+func (a *App) putHandler(ctx context.Context, w fsthttp.ResponseWriter, r *fsthttp.Request) {
+	ext, ok := media.GetExtension(r.Header.Get("Content-Type"))
+	if !ok {
+		badRequest(w, ErrUnknownContentType.Error())
+		return
+	}
+
+	length, err := a.checkContentLength(r.Header.Get("Content-Length"))
+	if err != nil {
+		badRequest(w, err.Error())
+		return
+	}
+
+	v, err := media.NewValidMediaReader(r.Body, ext, a.ValidateBufLength)
+	if err != nil {
+		internalError(w, err.Error())
+		return
+	}
+
+	defer v.Close()
+
+	if err := v.Validate(); err != nil {
+		var validatorErr media.ValidatorError
+		if errors.As(err, &validatorErr) {
+			badRequest(w, validatorErr.Error())
 			return
 		}
+		internalError(w, "error validating: "+err.Error())
+		return
+	}
 
-		length, err := a.checkContentLength(r.Header.Get("Content-Length"))
-		if err != nil {
-			badRequest(w, err.Error())
-			return
-		}
+	key, err := encodeKey(v.Hash, ext, length)
+	if err != nil {
+		internalError(w, err.Error())
+	}
 
-		v, err := media.NewValidMediaReader(r.Body, ext, a.ValidateBufLength)
-		if err != nil {
-			internalError(w, err.Error())
-			return
-		}
-
-		defer v.Close()
-
-		if err := v.Validate(); err != nil {
-			var validatorErr media.ValidatorError
-			if errors.As(err, &validatorErr) {
-				badRequest(w, validatorErr.Error())
-				return
-			}
-			internalError(w, "error validating: "+err.Error())
-			return
-		}
-
-		key, err := encodeKey(v.Hash, ext, length)
-		if err != nil {
-			internalError(w, err.Error())
-		}
-
-		if _, err := a.KVStore.Lookup(key); err == nil {
-			io.Copy(io.Discard, v)
-			sendPutOK(w, r, key, ext)
-			return
-		}
-
-		if err := a.KVStore.Insert(key, v); err != nil {
-			internalError(w, "error inserting: "+err.Error())
-			return
-		}
-
+	if _, err := a.KVStore.Lookup(key); err == nil {
+		io.Copy(io.Discard, v)
 		sendPutOK(w, r, key, ext)
 		return
 	}
+
+	if err := a.KVStore.Insert(key, v); err != nil {
+		internalError(w, "error inserting: "+err.Error())
+		return
+	}
+
+	sendPutOK(w, r, key, ext)
+	return
 }
 
-func sendPutOK(w http.ResponseWriter, r *http.Request, key string, ext string) {
+func sendPutOK(w fsthttp.ResponseWriter, r *fsthttp.Request, key string, ext string) {
 	w.Header().Add("Content-Type", jsonType)
 
 	if origin := r.Header.Get("Origin"); origin != "" {
 		w.Header().Add("Access-Control-Allow-Origin", origin)
 	}
 
-	w.WriteHeader(http.StatusOK)
+	w.WriteHeader(fsthttp.StatusOK)
 
 	const js = `{"status": "ok", "data": {"id": "%s", "link": "https://%s/img/v2/%s.%s"}}`
 	fmt.Fprintf(w, js, key, r.URL.Host, key, ext)
 }
 
-func (a *App) getHandlerV2() func(w http.ResponseWriter, r *http.Request) {
-	return func(w http.ResponseWriter, r *http.Request) {
-		t := requestTrace(r)
-		vars := mux.Vars(r)
-		key := vars["key"]
-		ext := vars["ext"]
+func (a *App) getHandlerV2(ctx context.Context, w fsthttp.ResponseWriter, r *fsthttp.Request) {
+	key, ext, err := parseGetURL(r.URL.Path)
+	if err != nil {
+		notFoundError(w)
+	}
 
-		s := t.AddSpan("decode-key")
-		k, err := decodeKey(key)
-		if err != nil {
-			internalError(w, "unable to decode key: "+err.Error())
-			return
-		}
-		s.End()
-
-		s = t.AddSpan("check-headers")
-		if checkIfNoneMatch(r.Header.Get("If-None-Match"), k.Hash) {
-			w.WriteHeader(http.StatusNotModified)
-			return
-		}
-
-		pbext := k.Extension.String()
-		if pbext != ext {
-			badRequest(w, fmt.Sprintf("URL extension (%s) does not match content (%s)", ext, pbext))
-			return
-		}
-
-		mime, ok := media.GetMimeType(pbext)
-		if !ok {
-			badRequest(w, "unknown extension "+k.Extension.String())
-			return
-		}
-		s.End()
-
-		res, hit, err := a.getOrSet(key, t)
-		if err != nil {
-			if err == kvstore.ErrKeyNotFound {
-				notFoundError(w)
-				return
-			}
-			internalError(w, err.Error())
-			return
-		}
-
-		if fw := fsthttp.ResponseWriterFromContext(r.Context()); fw != nil {
-			fw.SetManualFramingMode(true)
-		}
-
-		w.Header().Set("X-Cache", hit)
-		w.Header().Add("Content-Type", mime)
-		w.Header().Set("Content-Length", strconv.Itoa(int(k.GetSize())))
-		w.Header().Set("Etag", `"`+strconv.FormatUint(*k.Hash, 16)+`"`)
-		w.Header().Set("Trace", t.String())
-		w.WriteHeader(http.StatusOK)
-		io.Copy(w, res)
+	k, err := decodeKey(key)
+	if err != nil {
+		internalError(w, "unable to decode key: "+err.Error())
 		return
 	}
+
+	if checkIfNoneMatch(r.Header.Get("If-None-Match"), k.Hash) {
+		w.WriteHeader(fsthttp.StatusNotModified)
+		return
+	}
+
+	pbext := k.Extension.String()
+	if pbext != ext {
+		badRequest(w, fmt.Sprintf("URL extension (%s) does not match content (%s)", ext, pbext))
+		return
+	}
+
+	mime, ok := media.GetMimeType(pbext)
+	if !ok {
+		badRequest(w, "unknown extension "+k.Extension.String())
+		return
+	}
+
+	res, hit, err := a.getOrSet(key)
+	if err != nil {
+		if err == kvstore.ErrKeyNotFound {
+			notFoundError(w)
+			return
+		}
+		internalError(w, err.Error())
+		return
+	}
+
+	w.SetManualFramingMode(true)
+
+	w.Header().Set("X-Cache", hit)
+	w.Header().Add("Content-Type", mime)
+	w.Header().Set("Content-Length", strconv.Itoa(int(k.GetSize())))
+	w.Header().Set("Etag", `"`+strconv.FormatUint(*k.Hash, 16)+`"`)
+	w.WriteHeader(fsthttp.StatusOK)
+	io.Copy(w, res)
+	return
 }
 
-func (a *App) getHandlerV1() func(w http.ResponseWriter, r *http.Request) {
-	return func(w http.ResponseWriter, r *http.Request) {
-		vars := mux.Vars(r)
-		hash := vars["hash"]
-		ext := vars["ext"]
+var errInvalidImageURL = errors.New("invalid image URL")
 
-		mime, ok := media.GetMimeType(ext)
-		if !ok {
-			badRequest(w, "unknown extension "+ext)
-			return
-		}
-
-		res, hit, err := a.getOrSet(hash, &span{})
-		if err != nil {
-			if err == kvstore.ErrKeyNotFound {
-				notFoundError(w)
-				return
-			}
-			internalError(w, err.Error())
-			return
-		}
-
-		w.Header().Set("X-Cache", hit)
-		w.Header().Add("Content-Type", mime)
-		w.WriteHeader(http.StatusOK)
-		io.Copy(w, res)
-		return
+func parseGetURL(path string) (string, string, error) {
+	slash := strings.LastIndex(path, "/")
+	if slash == -1 {
+		return "", "", errInvalidImageURL
 	}
+	dot := strings.Index(path, ".")
+	if dot == -1 {
+		return "", "", errInvalidImageURL
+	}
+	return path[slash+1 : dot], path[dot+1:], nil
 }
 
-func (a *App) optionsHandler() func(w http.ResponseWriter, r *http.Request) {
-	return func(w http.ResponseWriter, r *http.Request) {
-		origin := r.Header.Get("Origin")
-		headers := r.Header.Get("Access-Control-Request-Headers")
-		methods := r.Header.Get("Access-Control-Request-Method")
+func (a *App) getHandlerV1(ctx context.Context, w fsthttp.ResponseWriter, r *fsthttp.Request) {
+	hash, ext, err := parseGetURL(r.URL.Path)
+	if err != nil {
+		notFoundError(w)
+	}
 
-		if origin != "" && headers != "" && methods != "" {
-			w.Header().Add("Access-Control-Allow-Origin", origin)
-			w.Header().Add("Access-Control-Allow-Methods", "GET,HEAD,PUT,OPTIONS")
-			w.Header().Add("Access-Control-Allow-Headers", headers)
-			w.Header().Add("Access-Control-Max-Age", "86400")
-			w.WriteHeader(http.StatusOK)
-		} else {
-			w.WriteHeader(http.StatusBadRequest)
-		}
+	mime, ok := media.GetMimeType(ext)
+	if !ok {
+		badRequest(w, "unknown extension "+ext)
 		return
 	}
+
+	res, hit, err := a.getOrSet(hash)
+	if err != nil {
+		if err == kvstore.ErrKeyNotFound {
+			notFoundError(w)
+			return
+		}
+		internalError(w, err.Error())
+		return
+	}
+
+	w.Header().Set("X-Cache", hit)
+	w.Header().Add("Content-Type", mime)
+	w.WriteHeader(fsthttp.StatusOK)
+	io.Copy(w, res)
+	return
+}
+
+func (a *App) optionsHandler(ctx context.Context, w fsthttp.ResponseWriter, r *fsthttp.Request) {
+	origin := r.Header.Get("Origin")
+	headers := r.Header.Get("Access-Control-Request-Headers")
+	methods := r.Header.Get("Access-Control-Request-Method")
+
+	if origin != "" && headers != "" && methods != "" {
+		w.Header().Add("Access-Control-Allow-Origin", origin)
+		w.Header().Add("Access-Control-Allow-Methods", "GET,HEAD,PUT,OPTIONS")
+		w.Header().Add("Access-Control-Allow-Headers", headers)
+		w.Header().Add("Access-Control-Max-Age", "86400")
+		w.WriteHeader(fsthttp.StatusOK)
+	} else {
+		w.WriteHeader(fsthttp.StatusBadRequest)
+	}
+	return
 }
 
 func (a *App) checkContentLength(cLen string) (uint32, error) {
@@ -220,15 +219,10 @@ func (a *App) checkContentLength(cLen string) (uint32, error) {
 	return uint32(u), nil
 }
 
-func (a *App) getOrSet(key string, t *span) (io.Reader, string, error) {
-	s := t.AddSpan("simple-cache")
-	defer s.End()
-
+func (a *App) getOrSet(key string) (io.Reader, string, error) {
 	hit := cacheHit
 
 	res, err := simple.GetOrSet([]byte(key), func() (simple.CacheEntry, error) {
-		s := s.AddSpan("kv-lookup")
-		defer s.End()
 
 		res, err := a.KVStore.Lookup(key)
 		if err != nil {
@@ -246,35 +240,37 @@ func (a *App) getOrSet(key string, t *span) (io.Reader, string, error) {
 	return res, hit, err
 }
 
-func (a *App) Router() *mux.Router {
-	r := mux.NewRouter()
-	exts := media.GetExtensions()
+func (a *App) API() func(ctx context.Context, w fsthttp.ResponseWriter, r *fsthttp.Request) {
+	return func(ctx context.Context, w fsthttp.ResponseWriter, r *fsthttp.Request) {
+		const (
+			root      = "/"
+			imgPrefix = "/img"
+			v2Prefix  = "/v2"
+		)
 
-	r.Path("/{prefix:(?:img/)?}").
-		Methods("PUT").
-		HandlerFunc(a.putHandler()).
-		Name("put")
+		if r.URL.Path[0:4] == imgPrefix {
+			r.URL.Path = r.URL.Path[4:]
+		}
 
-	r.Path(`/{prefix:(?:img/)?}{hash:[a-zA-Z0-9]{32,40}}.{ext:(?:` + strings.Join(exts, "|") + `)}`).
-		Methods("GET").
-		HandlerFunc(a.getHandlerV1()).
-		Name("get_v1")
+		if r.Method == fsthttp.MethodGet {
+			if r.URL.Path[0:len(v2Prefix)] == v2Prefix {
+				a.getHandlerV2(ctx, w, r)
+				return
+			}
+			if r.URL.Path[0:1] == root {
+				a.getHandlerV1(ctx, w, r)
+				return
+			}
+		}
+		if r.Method == fsthttp.MethodOptions && r.URL.Path == root {
+			a.optionsHandler(ctx, w, r)
+			return
+		}
+		if r.Method == fsthttp.MethodPut && r.URL.Path == root {
+			a.putHandler(ctx, w, r)
+			return
+		}
 
-	r.Path(`/{prefix:(?:img/)?}v2/{key:[a-zA-Z0-9]+}.{ext:(?:` + strings.Join(exts, "|") + `)}`).
-		Methods("GET").
-		HandlerFunc(a.getHandlerV2()).
-		Name("get_v2")
-
-	r.Path("/{prefix:(?:img/)?}").
-		Methods("OPTIONS").
-		HandlerFunc(a.optionsHandler()).
-		Name("options")
-
-	r.NotFoundHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		notFoundError(w)
-	})
-
-	r.Use(traceMiddleware)
-
-	return r
+	}
 }

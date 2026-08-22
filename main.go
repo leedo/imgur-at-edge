@@ -27,5 +27,5 @@ func main() {
 		TTL:               24 * time.Hour,
 	}
 
-	fsthttp.Serve(fsthttp.Adapt(app.Router()))
+	fsthttp.ServeFunc(app.API())
 }
