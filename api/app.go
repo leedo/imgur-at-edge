@@ -220,7 +220,7 @@ func (a *App) checkContentLength(cLen string) (uint32, error) {
 	return uint32(u), nil
 }
 
-func (a *App) getOrSet(key string, t *span) (io.Reader, string, error) {
+func (a *App) getOrSet(key string, t *span) (io.ReadCloser, string, error) {
 	s := t.AddSpan("simple-cache")
 	defer s.End()
 
