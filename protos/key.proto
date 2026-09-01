@@ -10,6 +10,7 @@ enum Extension {
   mp4 = 5;
   m4v = 6;
   heic = 7;
+  webp = 8;
 }
 
 message Key {

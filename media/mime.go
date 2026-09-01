@@ -5,6 +5,7 @@ var types = map[string]string{
 	"image/gif":       "gif",
 	"image/x-png":     "png",
 	"image/png":       "png",
+	"image/webp":      "webp",
 	"image/heic":      "heic",
 	"video/quicktime": "mov",
 	"video/mp4":       "mp4",
@@ -15,6 +16,7 @@ var mimes = map[string]string{
 	"jpg":  "image/jpeg",
 	"gif":  "image/gif",
 	"png":  "image/png",
+	"webp": "image/webp",
 	"heic": "image/heic",
 	"mov":  "video/quicktime",
 	"mp4":  "video/mp4",
@@ -49,6 +51,9 @@ var magic = map[string][]validator{
 		{[]byte{0xFF, 0xD8, 0xFF, 0xEE}, 0},
 		{[]byte{0xFF, 0xD8, 0xFF, 0xE1}, 0},
 	},
+	"webp": {
+		{[]byte{0x57,0x45,0x42,0x50},8},
+	},
 	"heic": {
 		{[]byte{0x66, 0x74, 0x79, 0x70, 0x68, 0x65, 0x69, 0x63}, 4},
 	},
@@ -66,4 +71,4 @@ var magic = map[string][]validator{
 	},
 }
 
-var exts = []string{"png", "gif", "jpg", "mp4", "mov", "m4v", "heic"}
+var exts = []string{"png", "gif", "jpg", "mp4", "mov", "m4v", "heic", "webp"}

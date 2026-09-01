@@ -31,6 +31,7 @@ const (
 	Extension_mp4  Extension = 5
 	Extension_m4v  Extension = 6
 	Extension_heic Extension = 7
+	Extension_webp Extension = 8
 )
 
 // Enum value maps for Extension.
@@ -43,6 +44,7 @@ var (
 		5: "mp4",
 		6: "m4v",
 		7: "heic",
+		8: "webp",
 	}
 	Extension_value = map[string]int32{
 		"jpg":  0,
@@ -52,6 +54,7 @@ var (
 		"mp4":  5,
 		"m4v":  6,
 		"heic": 7,
+		"webp": 8,
 	}
 )
 
@@ -151,7 +154,7 @@ const file_key_proto_rawDesc = "" +
 	"\x04hash\x18\x01 \x01(\x04R\x04hash\x12(\n" +
 	"\textension\x18\x02 \x01(\x0e2\n" +
 	".ExtensionR\textension\x12\x12\n" +
-	"\x04size\x18\x03 \x01(\rR\x04size*K\n" +
+	"\x04size\x18\x03 \x01(\rR\x04size*U\n" +
 	"\tExtension\x12\a\n" +
 	"\x03jpg\x10\x00\x12\a\n" +
 	"\x03png\x10\x01\x12\a\n" +
@@ -159,7 +162,8 @@ const file_key_proto_rawDesc = "" +
 	"\x03mov\x10\x04\x12\a\n" +
 	"\x03mp4\x10\x05\x12\a\n" +
 	"\x03m4v\x10\x06\x12\b\n" +
-	"\x04heic\x10\aB+Z)github.com/leedo/imgur-at-edge/protos/keyb\beditionsp\xe8\a"
+	"\x04heic\x10\a\x12\b\n" +
+	"\x04webp\x10\bB+Z)github.com/leedo/imgur-at-edge/protos/keyb\beditionsp\xe8\a"
 
 var (
 	file_key_proto_rawDescOnce sync.Once
