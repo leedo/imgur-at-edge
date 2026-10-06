@@ -1,5 +1,11 @@
 package media
 
+var videoTypes = map[string]bool{
+	"mp4": true,
+	"mov": true,
+	"m4v": true,
+}
+
 var types = map[string]string{
 	"image/jpeg":      "jpg",
 	"image/gif":       "gif",
@@ -33,6 +39,11 @@ func GetMimeType(ext string) (string, bool) {
 	return mime, ok
 }
 
+func IsVideo(ext string) bool {
+	_, ok := videoTypes[ext]
+	return ok
+}
+
 func GetExtensions() []string {
 	return exts
 }
@@ -52,7 +63,7 @@ var magic = map[string][]validator{
 		{[]byte{0xFF, 0xD8, 0xFF, 0xE1}, 0},
 	},
 	"webp": {
-		{[]byte{0x57,0x45,0x42,0x50},8},
+		{[]byte{0x57, 0x45, 0x42, 0x50}, 8},
 	},
 	"heic": {
 		{[]byte{0x66, 0x74, 0x79, 0x70, 0x68, 0x65, 0x69, 0x63}, 4},

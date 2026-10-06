@@ -10,7 +10,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-func decodeKey(key string) (*pbkey.Key, error) {
+func DecodeKey(key string) (*pbkey.Key, error) {
 	keydec, err := hex.DecodeString(key)
 	if err != nil {
 		return nil, err
@@ -24,7 +24,7 @@ func decodeKey(key string) (*pbkey.Key, error) {
 	return &k, nil
 }
 
-func encodeKey(hash []byte, ext string, length uint32) (string, error) {
+func EncodeKey(hash []byte, ext string, length uint32) (string, error) {
 	extt, ok := pbkey.Extension_value[ext]
 	if !ok {
 		return "", errors.New("unknown extension")

@@ -61,7 +61,7 @@ func (a *App) putHandler() func(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		key, err := encodeKey(v.Hash, ext, length)
+		key, err := EncodeKey(v.Hash, ext, length)
 		if err != nil {
 			internalError(w, err.Error())
 		}
@@ -103,7 +103,7 @@ func (a *App) getHandlerV2() func(w http.ResponseWriter, r *http.Request) {
 		ext := vars["ext"]
 
 		s := t.AddSpan("decode-key")
-		k, err := decodeKey(key)
+		k, err := DecodeKey(key)
 		if err != nil {
 			internalError(w, "unable to decode key: "+err.Error())
 			return
@@ -139,15 +139,19 @@ func (a *App) getHandlerV2() func(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if fw := fsthttp.ResponseWriterFromContext(r.Context()); fw != nil {
-			fw.SetManualFramingMode(true)
+		// For video files, we set the Content-Length header to allow for proper streaming and seeking.
+		if media.IsVideo(pbext) {
+			if fw := fsthttp.ResponseWriterFromContext(r.Context()); fw != nil {
+				fw.SetManualFramingMode(true)
+				w.Header().Set("Content-Length", strconv.Itoa(int(k.GetSize())))
+			}
 		}
 
 		w.Header().Set("X-Cache", hit)
 		w.Header().Add("Content-Type", mime)
-		w.Header().Set("Content-Length", strconv.Itoa(int(k.GetSize())))
 		w.Header().Set("Etag", `"`+strconv.FormatUint(*k.Hash, 16)+`"`)
 		w.Header().Set("Trace", t.String())
+
 		w.WriteHeader(http.StatusOK)
 		io.Copy(w, res)
 		return
